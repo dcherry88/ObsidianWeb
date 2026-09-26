@@ -160,7 +160,7 @@ export function renderMarkdown(src: string, files: string[], ctx?: RenderCtx): s
             .replace(/<blockquote>\n<p>\[!(\w+)\][+-]?\s*/g, (_m, t) => `<blockquote class="callout callout-${t.toLowerCase()}"><p><strong class="callout-title">${t}</strong> `)
             .replace(/<li>\[( |x|X)\] /g, (_m, c) => `<li class="task"><input type="checkbox" disabled ${c === " " ? "" : "checked"}> `)
             .replace(/==([^=<]+)==/g, "<mark>$1</mark>")
-            .replace(/(^|[\s>])#([\p{L}][\p{L}\p{N}_/-]*)/gu, '$1<span class="tag">#$2</span>'),
+            .replace(/(^|[\s>])#([\p{L}][\p{L}\p{N}_/-]*)/gu, '$1<span class="tag click" data-tag="$2" title="Show notes with this tag">#$2</span>'),
     )
     .join("");
 

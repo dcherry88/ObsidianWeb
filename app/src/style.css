@@ -188,3 +188,13 @@ pre.fm { font-size: 12px; color: var(--muted); border: 1px solid var(--border); 
 .app.web .right .tab.active { color: var(--accent); box-shadow: inset 0 -2px 0 var(--accent); }
 .app.web .right .row { border-radius: 6px; margin: 0 6px; color: var(--muted); }
 .app.web .right .row:hover { color: var(--fg); }
+
+/* backlinks / tags */
+.tagcloud { display: flex; flex-wrap: wrap; gap: 6px; }
+.tag.click { cursor: pointer; }
+.row .cnt { display: inline; margin-left: 6px; }
+.row.nav-sub { padding-left: 24px; color: var(--muted); }
+.seg { margin-left: 0; }
+.right .tabs { overflow-x: auto; }
+.right .tab { padding: 6px 9px; font-size: 12px; }
+.app.web .right { width: 290px; } .right .tab { padding: 6px 8px; }

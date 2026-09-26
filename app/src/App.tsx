@@ -6,6 +6,7 @@ import { outline, renderMarkdown, slug, splitFrontmatter, type RenderCtx } from 
 import { Editor } from "./Editor";
 import { NavMenu, Tree } from "./Tree";
 import { Search } from "./Search";
+import { useNoteIndex, useNoteTexts, frontmatterTags, inlineTags } from "./notes";
 
 const store = {
   get: <T,>(k: string, d: T): T => {
@@ -56,7 +57,8 @@ export function App() {
   const [sideView, setSideView] = useState<"tree" | "nav">(store.get("sideView", "tree"));
   const [showSide, setShowSide] = useState(true);
   const [showRight, setShowRight] = useState(true);
-  const [rightTab, setRightTab] = useState<"outline" | "history">("outline");
+  const [rightTab, setRightTab] = useState<"outline" | "backlinks" | "tags" | "history">("outline");
+  const [openTag, setOpenTag] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState<Set<string>>(new Set(store.get<string[]>("open", [])));
   const [commits, setCommits] = useState<Commit[]>([]);
@@ -146,6 +148,11 @@ export function App() {
     store.set("theme", theme);
     store.set("accent", accent);
   }, [theme, accent]);
+  const { texts, update: updateText } = useNoteTexts(provider, files);
+  const index = useNoteIndex(texts, files);
+  const myBacklinks = index.backlinks.get(current) ?? [];
+  const myTags = useMemo(() => [...new Set([...frontmatterTags(text), ...inlineTags(text)])], [text]);
+  const allTags = useMemo(() => [...index.tags.entries()].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0])), [index]);
   const heads = useMemo(() => outline(splitFrontmatter(text).body), [text]);
   const fm = splitFrontmatter(text).fm;
 
@@ -170,6 +177,7 @@ export function App() {
     try {
       await provider.write(current, draft!);
       setContent(draft!);
+      updateText(current, draft!);
       setDraft(null);
       setStatus("Saved & committed");
       provider.history(current).then(setCommits);
@@ -192,17 +200,18 @@ export function App() {
           <button class="tb-btn" title="Show or hide the navigation menu" onClick={() => setShowSide(!showSide)}>☰ Menu</button>
         )}
         <span class="brand" title="Home" onClick={() => location.assign("#/")}>ObsidianWeb</span>
-        <Search provider={boot.provider} notes={files} onOpen={go} />
+        <div class="seg" role="group" aria-label="View mode">
+          <button class={layout === "doc" ? "on" : ""} title="Web mode: a wiki-style site, one page at a time" onClick={() => setLayoutPersist("doc")}>Web</button>
+          <button class={layout === "vault" ? "on" : ""} title="Obsidian mode: tabs, split view and editor" onClick={() => setLayoutPersist("vault")}>Obsidian</button>
+        </div>
+        <Search notes={files} texts={texts} onOpen={go} />
+        <span class="grow" />
         {layout === "doc" && (
           <>
             <button class="tb-btn" title="Show or hide the 'On this page' and History panel" onClick={() => setShowRight(!showRight)}>On this page</button>
             <button class="tb-btn" title="Theme, colors and default view" onClick={() => setShowSettings(true)}>⚙ Settings</button>
           </>
         )}
-        <div class="seg" role="group" aria-label="View mode">
-          <button class={layout === "doc" ? "on" : ""} title="Web mode: a wiki-style site, one page at a time" onClick={() => setLayoutPersist("doc")}>Web</button>
-          <button class={layout === "vault" ? "on" : ""} title="Obsidian mode: tabs, split view and editor" onClick={() => setLayoutPersist("vault")}>Obsidian</button>
-        </div>
       </header>
     <div class={"shell " + (layout === "doc" ? "doc-mode" : "vault-mode")}>
       {layout === "vault" && <div class="ribbon">
@@ -338,7 +347,10 @@ export function App() {
                   <article class="md live" dangerouslySetInnerHTML={{ __html: html }} />
                 </div>
               ) : (
-                <article class="md">
+                <article class="md" onClick={(e) => {
+                  const t = (e.target as HTMLElement).closest?.(".tag[data-tag]") as HTMLElement | null;
+                  if (t) (setOpenTag(t.dataset.tag!), setRightTab("tags"), setShowRight(true));
+                }}>
                   {fm && !selected && <pre class="fm">{fm}</pre>}
                   <div dangerouslySetInnerHTML={{ __html: html }} />
                 </article>
@@ -371,7 +383,9 @@ export function App() {
         <aside class="right">
           <div class="tabs small">
             <div class={"tab" + (rightTab === "outline" ? " active" : "")} onClick={() => setRightTab("outline")}>{layout === "doc" ? "On this page" : "Outline"}</div>
-            <div class={"tab" + (rightTab === "history" ? " active" : "")} onClick={() => setRightTab("history")}>History</div>
+            <div class={"tab" + (rightTab === "backlinks" ? " active" : "")} title="Notes that link to this one" onClick={() => setRightTab("backlinks")}>Backlinks{myBacklinks.length ? ` (${myBacklinks.length})` : ""}</div>
+            <div class={"tab" + (rightTab === "tags" ? " active" : "")} title="Tags in this note and across the vault" onClick={() => setRightTab("tags")}>Tags</div>
+            <div class={"tab" + (rightTab === "history" ? " active" : "")} title="Git history of this note" onClick={() => setRightTab("history")}>History</div>
           </div>
           <div class="scroll">
             {rightTab === "outline" &&
@@ -380,6 +394,35 @@ export function App() {
                   {h.text}
                 </div>
               ))}
+            {rightTab === "backlinks" && (
+              <>
+                {!myBacklinks.length && <div class="muted pad">{texts.size < files.length ? "Indexing links…" : "No notes link here."}</div>}
+                {myBacklinks.map((b) => (
+                  <div class="row commit" title={b.from} onClick={() => go(b.from)}>
+                    <div>{title(b.from)} <small>{b.from.includes("/") ? b.from.slice(0, b.from.lastIndexOf("/")) : ""}</small></div>
+                    {b.snippet && <small>{b.snippet}</small>}
+                  </div>
+                ))}
+              </>
+            )}
+            {rightTab === "tags" && (
+              <>
+                <div class="muted pad small">This note</div>
+                <div class="pad tagcloud">
+                  {!myTags.length && <span class="muted">No tags</span>}
+                  {myTags.map((t) => <span class="tag click" onClick={() => (setOpenTag(t), setRightTab("tags"))}>#{t}</span>)}
+                </div>
+                <div class="muted pad small">All tags</div>
+                {allTags.map(([t, paths]) => (
+                  <div>
+                    <div class={"row" + (openTag === t ? " active" : "")} onClick={() => setOpenTag(openTag === t ? null : t)}>
+                      #{t} <small class="cnt">{paths.length}</small>
+                    </div>
+                    {openTag === t && paths.map((p) => <div class="row nav-sub" onClick={() => go(p)}>{title(p)}</div>)}
+                  </div>
+                ))}
+              </>
+            )}
             {rightTab === "history" && (
               <>
                 {!commits.length && <div class="muted pad">No history for this file.</div>}

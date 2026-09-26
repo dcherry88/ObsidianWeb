@@ -5,7 +5,7 @@ A web viewer/editor for a git-backed [Obsidian](https://obsidian.md) vault. Two 
 - **Web mode** (default): a wiki/docs-site layout. Folder nav menu, one page at a time, "On this page" outline.
 - **Obsidian mode**: tabs, split panes, file tree or flat list, and a markdown editor with live preview.
 
-Both modes have global search, raw-markdown view, light/dark/other themes, and **version history with diffs** from the vault's git history.
+Both modes have global search, backlinks, a tag browser, raw-markdown view, light/dark/other themes, and **version history with diffs** from the vault's git history.
 
 It runs two ways from the same frontend:
 

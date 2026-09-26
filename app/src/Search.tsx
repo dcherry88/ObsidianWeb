@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "preact/hooks";
-import type { VaultProvider } from "../../shared/types";
 import { splitFrontmatter } from "./md";
 
 interface Hit {
@@ -11,29 +10,12 @@ interface Hit {
 const title = (p: string) => p.split("/").pop()!.replace(/\.md$/, "");
 
 /** Global search: matches note names and note text. Note bodies are fetched once (on first focus) and cached. */
-export function Search({ provider, notes, onOpen }: { provider: VaultProvider; notes: string[]; onOpen: (p: string) => void }) {
+export function Search({ notes, texts, onOpen }: { notes: string[]; texts: Map<string, string>; onOpen: (p: string) => void }) {
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
   const [sel, setSel] = useState(0);
-  const [ready, setReady] = useState(0);
-  const cache = useRef(new Map<string, string>());
-  const loading = useRef(false);
+  const ready = texts.size;
   const input = useRef<HTMLInputElement>(null);
-
-  const load = async () => {
-    if (loading.current) return;
-    loading.current = true;
-    const todo = notes.filter((n) => !cache.current.has(n));
-    for (let i = 0; i < todo.length; i += 8) {
-      await Promise.all(
-        todo.slice(i, i + 8).map((n) =>
-          provider.read(n).then((t) => cache.current.set(n, splitFrontmatter(t).body)).catch(() => cache.current.set(n, "")),
-        ),
-      );
-      setReady(cache.current.size);
-    }
-    loading.current = false;
-  };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -53,7 +35,7 @@ export function Search({ provider, notes, onOpen }: { provider: VaultProvider; n
   if (term) {
     for (const n of notes) {
       const name = title(n).toLowerCase();
-      const body = cache.current.get(n) ?? "";
+      const body = splitFrontmatter(texts.get(n) ?? "").body;
       const at = body.toLowerCase().indexOf(term);
       const nameHit = name.includes(term) || n.toLowerCase().includes(term);
       if (!nameHit && at < 0) continue;
@@ -79,7 +61,7 @@ export function Search({ provider, notes, onOpen }: { provider: VaultProvider; n
         placeholder="Search notes…  (/ or Ctrl+K)"
         title="Search note titles and text. Shortcut: / or Ctrl/Cmd+K"
         value={q}
-        onFocus={() => (setOpen(true), load())}
+        onFocus={() => setOpen(true)}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
         onInput={(e) => (setQ((e.target as HTMLInputElement).value), setSel(0), setOpen(true))}
         onKeyDown={(e) => {

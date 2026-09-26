@@ -7,5 +7,5 @@ tags: [project, alpha]
 Goals for Alpha. Depends on [[Projects/Beta/Overview]].
 
 ## Tasks
-- [ ] Ship v1
+- [ ] Ship v1 (in progress)
 - [x] Write spec

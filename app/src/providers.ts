@@ -3,6 +3,11 @@ import type { AppConfig, Commit, VaultProvider } from "../../shared/types";
 const enc = (p: string) => p.split("/").map(encodeURIComponent).join("/");
 
 async function ok(r: Response): Promise<Response> {
+  // session expired (server mode with OIDC): go sign in again
+  if (r.status === 401) {
+    location.assign("./auth/login?next=" + encodeURIComponent(location.pathname));
+    throw new Error("Signing in…");
+  }
   if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
   return r;
 }
@@ -66,7 +71,8 @@ export async function loadProvider(): Promise<{ cfg: AppConfig; provider: VaultP
   let cfg: AppConfig = { mode: "server", canWrite: false };
   try {
     const r = await fetch("./config.json");
-    if (r.ok) cfg = await r.json();
+    if (r.status === 401) location.assign("./auth/login?next=" + encodeURIComponent(location.pathname));
+    else if (r.ok) cfg = await r.json();
   } catch {
     /* dev server without config: assume server mode */
   }

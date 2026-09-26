@@ -263,7 +263,13 @@ export function App() {
             <div class="muted small">
               Vault attachment folder (from .obsidian/app.json): <code>{boot.cfg.obsidian?.attachmentFolderPath ?? "not set"}</code>
             </div>
-            <div class="muted small">Settings are saved in this browser only.</div>
+            {boot.cfg.user && (
+              <div class="small">
+                Signed in as <b>{boot.cfg.user.name || boot.cfg.user.email || "user"}</b>
+                {boot.cfg.signOutUrl && <> · <a href={boot.cfg.signOutUrl}>Sign out</a></>}
+              </div>
+            )}
+            <div class="muted small">Theme and view settings are saved in this browser only.</div>
           </div>
         </div>
       )}

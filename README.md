@@ -12,10 +12,11 @@ It runs two ways from the same frontend:
 | | **Static (GitHub Pages)** | **Server (Node / Docker)** |
 |---|---|---|
 | Hosting | GitHub Pages, no backend | Any machine that can run Node or Docker |
+| Vault source | Folder in a public repo | A git repo folder **or** a [Fast Note Sync](https://github.com/haierkeys/fast-note-sync-service) service |
 | Vault visibility | Public only (the site is public) | Public or private (your network, your auth) |
 | History | GitHub API (60 requests/hour/visitor unauthenticated) | Local `git log`, no limits |
 | Editing | Read-only | Saves and commits to git (`ALLOW_WRITE=1`) |
-| Auth | None | None built in yet (see [Security](#security)) |
+| Auth | None | Optional OIDC login (Pocket ID, Entra ID, ...) |
 
 ## What it renders
 Markdown (tables, task lists, code highlighting), YAML frontmatter, `[[wikilinks]]` and `[[link|alias]]`, `#tags`, `==highlights==`, `> [!note]` callouts, and images via `![[img.png|width]]` or `![](img.png)`. Attachments are found using the `attachmentFolderPath` from the vault's `.obsidian/app.json`. Other Obsidian settings, plugins, Canvas and Dataview are not supported.
@@ -151,15 +152,62 @@ Notes for containers:
 | `ALLOW_WRITE` | off | `1`/`true` lets the UI save (each save is a git commit) |
 | `DEFAULT_LAYOUT` | `doc` | `doc` (Web mode) or `vault` (Obsidian mode) for first-time visitors |
 | `APP_DIST` | `./app/dist` | Where the built frontend is |
+| `VAULT_SOURCE` | `git` | `git` or `fns` (see [Vault from Fast Note Sync](#vault-from-fast-note-sync)) |
+| `OIDC_*`, `PUBLIC_URL` | unset | Login, see [Login with OIDC](#login-with-oidc) |
 
 ### Running behind a reverse proxy
 Any proxy (Caddy, nginx, Traefik) works: forward everything to port 8787. Enable HTTPS at the proxy.
 
 ### Security
-There is **no built-in authentication yet**. Anyone who can reach the server can read the whole vault, and if `ALLOW_WRITE` is on, change it. Until OIDC login lands (planned; see [PLAN.md](PLAN.md)):
-- Do not expose the server directly to the internet with a private vault.
-- Put it behind an authenticating proxy (Authelia, Pocket ID with a forward-auth proxy, Cloudflare Access, basic auth) or keep it on a private network/VPN.
-- Leave `ALLOW_WRITE` off unless the endpoint is protected.
+By default there is **no authentication**: anyone who can reach the server can read the vault (and, with `ALLOW_WRITE`, change it). For anything private, either enable OIDC login (below) or keep the server on a private network / behind an authenticating proxy. Leave `ALLOW_WRITE` off unless the endpoint is protected.
+
+---
+
+## Login with OIDC
+Set `OIDC_ISSUER` and the server requires sign-in for everything except `/healthz`. It uses the authorization-code flow with PKCE, so it works with Pocket ID, Entra ID, Authentik, Keycloak and other standard providers. **Every user who can sign in gets the same access** (no roles yet).
+
+1. In your identity provider, register a client for ObsidianWeb with the redirect/callback URL `https://<your host>/auth/callback` (exactly `PUBLIC_URL` + `/auth/callback`).
+2. Set the environment variables:
+
+| Variable | Meaning |
+|---|---|
+| `OIDC_ISSUER` | Provider base URL (must serve `/.well-known/openid-configuration`), e.g. `https://id.example.com` |
+| `OIDC_CLIENT_ID` | Client ID from the provider |
+| `OIDC_CLIENT_SECRET` | Client secret (leave unset for a public/PKCE-only client) |
+| `PUBLIC_URL` | The URL users open, e.g. `https://notes.example.com`. Used for the callback URL and the `Secure` cookie flag |
+| `OIDC_SCOPES` | Default `openid profile email` |
+| `SESSION_TTL_HOURS` | Default `168` (7 days) |
+| `OIDC_ALLOW_INSECURE` | `1` to allow a plain-HTTP issuer (local testing only) |
+
+Sessions are kept in server memory, so a restart signs everyone out (they just sign in again). Sign out is in **Settings**. Behind a reverse proxy, forward everything to the container and make sure `PUBLIC_URL` is the public HTTPS address.
+
+> Tested against a small mock OIDC provider (`scripts/mock-oidc.mjs`): login, callback, session, logout, replay protection, 401 for API calls. Not yet tested against Pocket ID itself.
+
+---
+
+## Vault from Fast Note Sync
+[Fast Note Sync](https://github.com/haierkeys/fast-note-sync-service) (FNS) is a self-hosted service plus Obsidian plugin that syncs a vault between your desktop and mobile apps. ObsidianWeb can use it as its source, so you do not need a git repo: sync from your devices to FNS, and ObsidianWeb pulls the changes down and serves them.
+
+```bash
+cp .env.example .env         # set FNS_TOKEN, FNS_VAULT, PUBLIC_URL, OIDC_*
+docker compose up -d --build
+```
+The included `docker-compose.yml` runs both services. To use an FNS you already run, set the `FNS_*` variables on the `obsidianweb` service only.
+
+How it works: on start and then every `FNS_SYNC_INTERVAL` seconds (default 60; `0` disables the timer) the server lists notes and attachments through FNS's REST API, downloads the ones whose content hash changed into `/data/vault`, and removes ones that were deleted. If FNS is unreachable it keeps serving the last copy and shows the error at `/api/sync/status`. `POST /api/sync` triggers an immediate sync. Note history and diffs come from FNS's own per-note history. This mode is **read-only**.
+
+| Variable | Meaning |
+|---|---|
+| `VAULT_SOURCE` | `fns` (default is `git`) |
+| `FNS_URL` | Base URL of the service, e.g. `http://fast-note-sync:9000` |
+| `FNS_TOKEN` | API token (admin panel, "Copy API Config") |
+| `FNS_VAULT` | Vault name as shown in the plugin/admin panel |
+| `FNS_SYNC_INTERVAL` | Seconds between syncs (default 60) |
+| `FNS_AUTH_SCHEME` | `auto` (default), `raw` or `bearer`: how the token is sent in the `Authorization` header |
+| `ATTACHMENT_FOLDER` | Attachment folder (`.obsidian` settings are not synced, so set this if yours isn't the vault root) |
+| `DATA_DIR` | Where the synced copy lives (default `./data`, `/data` in Docker; use a volume) |
+
+> Built from FNS's published REST documentation and tested against a mock of that API (`scripts/mock-fns.mjs`: full sync, incremental update, outage handling, history), **not** against a real FNS instance. The exact JSON field names could differ; if a first sync fails, check `/api/sync/status` and the container log and open an issue.
 
 ---
 

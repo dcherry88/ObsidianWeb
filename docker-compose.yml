@@ -1,0 +1,33 @@
+# ObsidianWeb + Fast Note Sync service, with OIDC login.
+# 1. cp .env.example .env and fill it in     2. docker compose up -d --build
+services:
+  fast-note-sync:
+    image: haierkeys/fast-note-sync-service:latest
+    ports: ["9000:9000"]            # admin UI + API; your Obsidian apps sync to this
+    volumes:
+      - ./fns/storage:/fast-note-sync/storage
+      - ./fns/config:/fast-note-sync/config
+    restart: unless-stopped
+
+  obsidianweb:
+    build: .
+    depends_on: [fast-note-sync]
+    ports: ["8787:8787"]
+    environment:
+      VAULT_SOURCE: fns
+      FNS_URL: http://fast-note-sync:9000
+      FNS_TOKEN: ${FNS_TOKEN}         # API token from the service's admin panel ("Copy API Config")
+      FNS_VAULT: ${FNS_VAULT}         # vault name exactly as shown in the plugin/admin panel
+      FNS_SYNC_INTERVAL: ${FNS_SYNC_INTERVAL:-60}
+      ATTACHMENT_FOLDER: ${ATTACHMENT_FOLDER:-}
+      DEFAULT_LAYOUT: ${DEFAULT_LAYOUT:-doc}
+      PUBLIC_URL: ${PUBLIC_URL}       # the URL users open, e.g. https://notes.example.com
+      OIDC_ISSUER: ${OIDC_ISSUER:-}   # leave empty to disable login (private network only!)
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+    volumes:
+      - obsidianweb-data:/data        # the synced copy of your vault
+    restart: unless-stopped
+
+volumes:
+  obsidianweb-data:

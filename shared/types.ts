@@ -12,6 +12,9 @@ export interface AppConfig {
   defaultLayout?: "doc" | "vault";
   /** subset of the vault's .obsidian/app.json that affects rendering */
   obsidian?: { attachmentFolderPath?: string };
+  /** signed-in user when OIDC is enabled */
+  user?: { name?: string; email?: string };
+  signOutUrl?: string;
   /** static mode only: GitHub repo used for history, e.g. "owner/repo" */
   repo?: string;
   branch?: string;

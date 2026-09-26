@@ -1,54 +1,51 @@
 import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
-import type { AppConfig, Commit } from "../../shared/types";
+import type { AppConfig } from "../../shared/types";
+import { type Backend, GitBackend, safePath } from "./backend";
+import { FnsBackend } from "./fns";
+import { setupAuth } from "./auth";
 
-const run = promisify(execFile);
+const env = process.env;
+const flag = (v?: string) => ["1", "true", "yes"].includes((v ?? "").toLowerCase());
 
-// --- config (env) ---
-const VAULT = path.resolve(process.env.VAULT_PATH ?? "./vault");
-const APP_DIST = path.resolve(process.env.APP_DIST ?? "./app/dist");
-const PORT = Number(process.env.PORT ?? 8787);
-const ALLOW_WRITE = ["1", "true"].includes(process.env.ALLOW_WRITE ?? "");
+const PORT = Number(env.PORT ?? 8787);
+const APP_DIST = path.resolve(env.APP_DIST ?? "./app/dist");
+const DATA_DIR = path.resolve(env.DATA_DIR ?? "./data");
+const SOURCE = (env.VAULT_SOURCE ?? "git").toLowerCase();
 
-const git = (...args: string[]) =>
-  run("git", ["-c", "core.quotepath=off", "-C", VAULT, ...args], { maxBuffer: 64 * 1024 * 1024 });
+// ---- vault backend: local git repo (default) or a Fast Note Sync service mirrored to disk ----
+let VAULT: string;
+let backend: Backend;
+let fns: FnsBackend | undefined;
 
-/** Resolve a vault-relative path, rejecting anything that escapes the vault. */
-function safe(rel: string): string {
-  const abs = path.resolve(VAULT, rel);
-  if (abs !== VAULT && !abs.startsWith(VAULT + path.sep)) throw new Error("bad path");
-  if (rel.split("/").some((p) => p === ".git" || p === ".obsidian")) throw new Error("bad path");
-  return abs;
-}
-
-async function tree(): Promise<string[]> {
-  const { stdout } = await git("ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", ".");
-  return stdout
-    .split("\0")
-    .filter((f) => f && !f.startsWith(".obsidian/"))
-    .sort((a, b) => a.localeCompare(b));
-}
-
-async function history(file: string): Promise<Commit[]> {
-  safe(file);
-  const { stdout } = await git("log", "--follow", "--format=%H%x1f%an%x1f%aI%x1f%s", "--", file);
-  return stdout
-    .split("\n")
-    .filter(Boolean)
-    .map((l) => {
-      const [sha, author, date, message] = l.split("\x1f");
-      return { sha, author, date, message };
-    });
+if (SOURCE === "fns") {
+  for (const k of ["FNS_URL", "FNS_TOKEN", "FNS_VAULT"]) if (!env[k]) throw new Error(`VAULT_SOURCE=fns requires ${k}`);
+  VAULT = path.join(DATA_DIR, "vault");
+  fns = new FnsBackend({
+    url: env.FNS_URL!,
+    token: env.FNS_TOKEN!,
+    vault: env.FNS_VAULT!,
+    mirrorDir: VAULT,
+    stateFile: path.join(DATA_DIR, "fns-state.json"),
+    intervalSec: Number(env.FNS_SYNC_INTERVAL ?? 60),
+    authScheme: (["raw", "bearer"].includes(env.FNS_AUTH_SCHEME ?? "") ? env.FNS_AUTH_SCHEME : "auto") as "auto" | "raw" | "bearer",
+  });
+  backend = fns;
+} else {
+  VAULT = path.resolve(env.VAULT_PATH ?? "./vault");
+  backend = new GitBackend(VAULT, flag(env.ALLOW_WRITE));
 }
 
 const app = new Hono();
+const auth = setupAuth(app, env); // no-op unless OIDC_ISSUER is set
+
+app.get("/healthz", (c) => c.text("ok"));
 
 async function obsidianSettings(): Promise<AppConfig["obsidian"]> {
+  if (env.ATTACHMENT_FOLDER) return { attachmentFolderPath: env.ATTACHMENT_FOLDER };
   try {
     const j = JSON.parse(await readFile(path.join(VAULT, ".obsidian/app.json"), "utf8"));
     return { attachmentFolderPath: j.attachmentFolderPath };
@@ -57,27 +54,64 @@ async function obsidianSettings(): Promise<AppConfig["obsidian"]> {
   }
 }
 
-app.get("/config.json", async (c) =>
-  c.json({
+app.get("/config.json", async (c) => {
+  const u = auth.userOf(c);
+  return c.json({
     mode: "server",
-    canWrite: ALLOW_WRITE,
-    defaultLayout: process.env.DEFAULT_LAYOUT === "vault" ? "vault" : "doc",
+    canWrite: backend.canWrite,
+    defaultLayout: env.DEFAULT_LAYOUT === "vault" ? "vault" : "doc",
     obsidian: await obsidianSettings(),
-  } satisfies AppConfig),
-);
+    user: u ? { name: u.name, email: u.email } : undefined,
+    signOutUrl: auth.enabled ? "./auth/logout" : undefined,
+  } satisfies AppConfig);
+});
+
+app.get("/api/tree", async (c) => c.json(await backend.tree()));
+
+app.get("/api/file", async (c) => {
+  const p = c.req.query("path") ?? "";
+  const ref = c.req.query("ref");
+  try {
+    if (ref) {
+      if (!backend.isValidRef(ref)) return c.text("bad ref", 400);
+      return c.text(await backend.readAt(p, ref));
+    }
+    return c.text((await backend.read(p)).toString("utf8"));
+  } catch {
+    return c.text("not found", 404);
+  }
+});
+
+app.get("/api/history", async (c) => {
+  try {
+    return c.json(await backend.history(c.req.query("path") ?? ""));
+  } catch (e) {
+    console.warn("[history]", (e as Error).message);
+    return c.json([]);
+  }
+});
+
+app.put("/api/file", async (c) => {
+  if (!backend.canWrite || !backend.write) return c.text("writes disabled", 403);
+  const { path: p, content, message } = await c.req.json<{ path: string; content: string; message?: string }>();
+  if (!p.endsWith(".md")) return c.text("markdown only", 400);
+  safePath(VAULT, p);
+  await backend.write(p, content, message);
+  return c.text("ok");
+});
 
 const MIME: Record<string, string> = {
   png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp",
   svg: "image/svg+xml", pdf: "application/pdf", mp3: "audio/mpeg", mp4: "video/mp4", webm: "video/webm",
 };
 
-// Attachments (images etc.). SVG is served as an attachment-safe type via CSP sandbox.
+// Attachments (images etc.). Served sandboxed so an SVG cannot run script in this origin.
 app.get("/api/raw", async (c) => {
   try {
     const p = c.req.query("path") ?? "";
-    const buf = await readFile(safe(p));
+    const buf = await backend.read(p);
     const ext = p.split(".").pop()!.toLowerCase();
-    return c.body(buf, 200, {
+    return c.body(new Uint8Array(buf), 200, {
       "content-type": MIME[ext] ?? "application/octet-stream",
       "content-security-policy": "sandbox",
       "x-content-type-options": "nosniff",
@@ -87,52 +121,22 @@ app.get("/api/raw", async (c) => {
   }
 });
 
-app.get("/api/tree", async (c) => c.json(await tree()));
-
-app.get("/api/file", async (c) => {
-  const p = c.req.query("path") ?? "";
-  const ref = c.req.query("ref");
-  try {
-    if (ref) {
-      if (!/^[0-9a-f]{7,40}$/.test(ref)) return c.text("bad ref", 400);
-      safe(p);
-      const { stdout } = await git("show", `${ref}:./${p}`);
-      return c.text(stdout);
-    }
-    return c.text(await readFile(safe(p), "utf8"));
-  } catch {
-    return c.text("not found", 404);
-  }
-});
-
-app.get("/api/history", async (c) => {
-  try {
-    return c.json(await history(c.req.query("path") ?? ""));
-  } catch {
-    return c.json([]);
-  }
-});
-
-app.put("/api/file", async (c) => {
-  if (!ALLOW_WRITE) return c.text("writes disabled (set ALLOW_WRITE=1)", 403);
-  const { path: p, content, message } = await c.req.json<{ path: string; content: string; message?: string }>();
-  if (!p.endsWith(".md")) return c.text("markdown only", 400);
-  const abs = safe(p);
-  await mkdir(path.dirname(abs), { recursive: true });
-  await writeFile(abs, content, "utf8");
-  await git("add", "--", p);
-  try {
-    await git("commit", "-m", message || `Update ${p}`, "--", p);
-  } catch {
-    /* nothing changed */
-  }
-  return c.text("ok");
-});
+if (fns) {
+  app.get("/api/sync/status", (c) => c.json(fns!.status));
+  // any signed-in user may trigger a resync (all users have the same access)
+  app.post("/api/sync", async (c) => {
+    void fns!.syncOnce();
+    return c.json({ started: true });
+  });
+}
 
 // Built frontend (SPA is hash-routed, so no rewrites needed)
-const rel = path.relative(process.cwd(), APP_DIST);
-app.use("/*", serveStatic({ root: rel }));
+app.use("/*", serveStatic({ root: path.relative(process.cwd(), APP_DIST) }));
 
+await backend.init?.();
 serve({ fetch: app.fetch, port: PORT }, () => {
-  console.log(`Vault: ${VAULT}\nWrites: ${ALLOW_WRITE ? "enabled" : "disabled"}\nhttp://localhost:${PORT}`);
+  console.log(
+    `Source: ${SOURCE === "fns" ? `fast-note-sync (${env.FNS_URL}, vault "${env.FNS_VAULT}", every ${env.FNS_SYNC_INTERVAL ?? 60}s)` : VAULT}\n` +
+      `Writes: ${backend.canWrite ? "enabled" : "disabled"}\nAuth: ${auth.enabled ? "OIDC (" + env.OIDC_ISSUER + ")" : "none"}\nhttp://localhost:${PORT}`,
+  );
 });

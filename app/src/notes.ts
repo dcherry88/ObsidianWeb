@@ -30,10 +30,10 @@ export function frontmatterTags(text: string): string[] {
   const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
   if (!m) return [];
   const fm = m[1];
-  const inline = /^tags:\s*\[(.*)\]\s*$/m.exec(fm) ?? /^tags:\s*([^\n\[]+)$/m.exec(fm);
-  if (inline) return inline[1].split(",").map((t) => t.trim().replace(/^#/, "")).filter(Boolean);
-  const list = /^tags:\s*\n((?:\s*-\s*.+\n?)+)/m.exec(fm);
-  return list ? list[1].split("\n").map((l) => l.replace(/^\s*-\s*/, "").trim().replace(/^#/, "")).filter(Boolean) : [];
+  const list = /^tags:[ \t]*\n((?:[ \t]*-[ \t]*.+\n?)+)/m.exec(fm);
+  if (list) return list[1].split("\n").map((l) => l.replace(/^\s*-\s*/, "").trim().replace(/^#/, "")).filter(Boolean);
+  const inline = /^tags:[ \t]*\[(.*)\][ \t]*$/m.exec(fm) ?? /^tags:[ \t]*([^\n\[]+)$/m.exec(fm);
+  return inline ? inline[1].split(",").map((t) => t.trim().replace(/^#/, "")).filter(Boolean) : [];
 }
 
 export function inlineTags(text: string): string[] {

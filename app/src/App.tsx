@@ -204,7 +204,7 @@ export function App() {
           <button class={layout === "doc" ? "on" : ""} title="Web mode: a wiki-style site, one page at a time" onClick={() => setLayoutPersist("doc")}>Web</button>
           <button class={layout === "vault" ? "on" : ""} title="Obsidian mode: tabs, split view and editor" onClick={() => setLayoutPersist("vault")}>Obsidian</button>
         </div>
-        <Search notes={files} texts={texts} onOpen={go} />
+        <Search notes={files} texts={texts} noteTags={index.noteTags} allTags={allTags} onOpen={go} />
         <span class="grow" />
         {layout === "doc" && (
           <>

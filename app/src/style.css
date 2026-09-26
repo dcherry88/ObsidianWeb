@@ -198,3 +198,7 @@ pre.fm { font-size: 12px; color: var(--muted); border: 1px solid var(--border); 
 .right .tabs { overflow-x: auto; }
 .right .tab { padding: 6px 9px; font-size: 12px; }
 .app.web .right { width: 290px; } .right .tab { padding: 6px 8px; }
+.tag-suggest { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+.tag-suggest small { opacity: 0.7; margin-left: 2px; }
+.hit-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+.hit-tags .tag { font-size: 11px; padding: 0 6px; }

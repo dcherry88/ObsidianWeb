@@ -7,6 +7,15 @@ A web viewer/editor for a git-backed [Obsidian](https://obsidian.md) vault. Two 
 
 Both modes have global search, backlinks, a tag browser, raw-markdown view, light/dark/other themes, and **version history with diffs** from the vault's git history.
 
+**Live demo:** <https://dcherry88.github.io/ObsidianWeb/> (static mode, showing the sample notes in `vault/`). Good pages to try:
+[Markdown showcase](https://dcherry88.github.io/ObsidianWeb/#/Guide/Markdown%20Showcase.md) ·
+[Links and backlinks](https://dcherry88.github.io/ObsidianWeb/#/Guide/Links%20and%20Backlinks.md) ·
+[Tags](https://dcherry88.github.io/ObsidianWeb/#/Guide/Tags%20Demo.md) ·
+[Vertical sections](https://dcherry88.github.io/ObsidianWeb/#/Guide/Vertical%20Sections.md) ·
+[Images](https://dcherry88.github.io/ObsidianWeb/#/Reference/Images.md) ·
+[PDFs](https://dcherry88.github.io/ObsidianWeb/#/Reference/PDFs.md) ·
+[History diffs](https://dcherry88.github.io/ObsidianWeb/#/Guide/History%20Demo.md)
+
 It runs two ways from the same frontend:
 
 | | **Static (GitHub Pages)** | **Server (Node / Docker)** |

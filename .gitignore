@@ -3,3 +3,4 @@ dist
 .env
 .DS_Store
 vault/.obsidian/workspace*.json
+package-lock.json

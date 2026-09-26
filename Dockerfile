@@ -4,7 +4,7 @@ WORKDIR /srv
 COPY package*.json tsconfig.base.json ./
 COPY app/package.json app/
 COPY server/package.json server/
-RUN npm ci
+RUN npm install
 COPY . .
 RUN npm run build
 ENV VAULT_PATH=/vault PORT=8787

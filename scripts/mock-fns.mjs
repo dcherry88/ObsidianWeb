@@ -7,6 +7,7 @@ import http from "node:http";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
+import { Readable } from "node:stream";
 
 const dir = path.resolve(process.argv[2] ?? "vault");
 const PORT = Number(process.env.PORT ?? 9100);
@@ -17,6 +18,7 @@ const CAN_WRITE = process.env.MOCK_WRITE === "1";
 
 const notes = new Map(); // path -> { content, mtime, version }
 const files = []; // attachments (read from disk)
+const uploads = new Map(); // attachments uploaded through the API (kept in memory)
 const folders = new Set();
 const log = [];
 let nextId = 1;
@@ -36,9 +38,10 @@ const noteMeta = (p) => {
   const n = notes.get(p);
   return { id: n.id, path: p, contentHash: hash(n.content), mtime: n.mtime, size: n.content.length, version: n.version };
 };
+const fileBytes = (p) => (uploads.has(p) ? uploads.get(p) : readFileSync(path.join(dir, p)));
 const fileMeta = (p) => {
-  const b = readFileSync(path.join(dir, p));
-  return { id: files.indexOf(p) + 1, path: p, contentHash: hash(b.toString("latin1")), mtime: statSync(path.join(dir, p)).mtimeMs, size: b.length };
+  const b = fileBytes(p);
+  return { id: files.indexOf(p) + 1, path: p, contentHash: hash(b.toString("latin1")), mtime: uploads.has(p) ? Date.now() : statSync(path.join(dir, p)).mtimeMs, size: b.length };
 };
 const ok = (data) => JSON.stringify({ code: 1, status: true, message: "ok", data });
 const fail = (code, message, details) => JSON.stringify({ code, status: false, message, ...(details ? { details } : {}) });
@@ -54,9 +57,16 @@ http
     const clientOk = CLIENT === "*" || (CLIENT.endsWith("*") ? xc.startsWith(CLIENT.slice(0, -1)) : xc === CLIENT);
     if (!clientOk)
       return json(fail(315, "Auth token Scope restricted", `Permission denied: ${u.pathname}`));
-    let bodyText = "";
-    for await (const c of req) bodyText += c;
-    const body = bodyText ? JSON.parse(bodyText) : {};
+    let body = {};
+    let form;
+    if ((req.headers["content-type"] ?? "").startsWith("multipart/form-data")) {
+      form = await new Request("http://x", { method: "POST", headers: req.headers, body: Readable.toWeb(req), duplex: "half" }).formData();
+      body = Object.fromEntries([...form.entries()].filter(([, v]) => typeof v === "string"));
+    } else {
+      let bodyText = "";
+      for await (const c of req) bodyText += c;
+      body = bodyText ? JSON.parse(bodyText) : {};
+    }
     const vault = u.searchParams.get("vault") ?? body.vault;
     if (vault && vault !== VAULT && !u.pathname.includes("history")) return json(fail(414, "Note Vault does not exist"));
     const write = req.method !== "GET";
@@ -104,10 +114,27 @@ http
       log.push({ op: "rmdir", path: body.path, by: who });
       return json(ok({ path: body.path }));
     }
+    if (u.pathname === "/api/file" && req.method === "POST") {
+      const f = form?.get("file");
+      if (!f || typeof f === "string") return json(fail(505, "Invalid Params"));
+      uploads.set(body.path, Buffer.from(await f.arrayBuffer()));
+      if (!files.includes(body.path)) files.push(body.path);
+      log.push({ op: "upload", path: body.path, size: uploads.get(body.path).length, by: who, client: xc });
+      return json(ok(fileMeta(body.path)));
+    }
+    if (u.pathname === "/api/file/rename" && req.method === "POST") {
+      const i = files.indexOf(body.oldPath);
+      if (i < 0) return json(fail(428, "not found"));
+      files[i] = body.path;
+      if (uploads.has(body.oldPath)) (uploads.set(body.path, uploads.get(body.oldPath)), uploads.delete(body.oldPath));
+      else uploads.set(body.path, readFileSync(path.join(dir, body.oldPath)));
+      log.push({ op: "file-rename", from: body.oldPath, to: body.path, by: who, client: xc });
+      return json(ok({ path: body.path }));
+    }
     if (u.pathname === "/api/file") {
       if (!files.includes(q)) return json(fail(428, "not found"), 404);
       res.writeHead(200, { "content-type": "application/octet-stream" });
-      return res.end(readFileSync(path.join(dir, q)));
+      return res.end(fileBytes(q));
     }
     if (u.pathname === "/api/note/histories")
       return json(paged([3, 2, 1].map((v) => ({ id: 100 + v, path: q, version: v, clientName: "Desktop", clientType: "obsidian", createdAt: new Date(Date.now() - v * 86400000).toISOString() }))));

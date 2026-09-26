@@ -45,6 +45,9 @@ export interface VaultProvider {
   rename?(from: string, to: string): Promise<void>;
   remove?(path: string): Promise<void>;
   removeDir?(path: string): Promise<void>;
+  renameDir?(from: string, to: string): Promise<void>;
+  /** upload an attachment for the note being edited; returns where it was stored */
+  upload?(note: string, file: File): Promise<{ path: string; name: string }>;
   /** URL for a non-markdown vault file (images, PDFs...) */
   assetUrl(path: string): string;
 }

@@ -8,6 +8,7 @@ import { Editor } from "./Editor";
 import { NavMenu, Tree } from "./Tree";
 import { Search } from "./Search";
 import { Icon } from "./Icon";
+import type { EditorApi } from "./Editor";
 import { CODE_OPTIONS, DEFAULT_FONT, FONT_OPTIONS, LINE_HEIGHTS, SPACINGS, WIDTHS, fontVars, type FontPrefs } from "./fonts";
 import { useNoteIndex, useNoteTexts, frontmatterTags, inlineTags } from "./notes";
 
@@ -110,7 +111,7 @@ export function App() {
   const [editorKey, setEditorKey] = useState(0);
   const [saving, setSaving] = useState(false);
   const [loadedFor, setLoadedFor] = useState(""); // the page whose text is in `content` (the editor waits for this)
-  type Dlg = { kind: "newPage" | "newFolder" | "rename" | "delete" | "deleteFolder"; folder?: string; name?: string; value?: string; target?: string };
+  type Dlg = { kind: "newPage" | "newFolder" | "rename" | "delete" | "deleteFolder" | "renameFolder"; folder?: string; name?: string; value?: string; target?: string };
   const [dlg, setDlg] = useState<Dlg | null>(null);
   const [dlgBusy, setDlgBusy] = useState(false);
   const [dlgErr, setDlgErr] = useState("");
@@ -118,6 +119,8 @@ export function App() {
   const dirtyRef = useRef(false);
   const skipHash = useRef(false);
   const startEdit = useRef<string | null>(null);
+  const editorApi = useRef<EditorApi | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
   const [splitContent, setSplitContent] = useState("");
 
   useEffect(() => {
@@ -158,7 +161,7 @@ export function App() {
   }, []);
 
   const provider = boot?.provider;
-  const canEdit = !!provider?.canWrite && !mobile;
+  const canEdit = !!provider?.canWrite;
   currentRef.current = current;
 
   // load file + history when path changes
@@ -357,6 +360,19 @@ export function App() {
     setShowDiff(false);
     setEditorKey((k) => k + 1);
   };
+  const uploadFiles = async (fs: File[]) => {
+    if (!provider?.upload || !fs.length) return;
+    setStatus(`Uploading ${fs.length} file${fs.length === 1 ? "" : "s"}…`);
+    try {
+      const links: string[] = [];
+      for (const f of fs) links.push(`![[${(await provider.upload(current, f)).name}]]`);
+      await refreshTree(); // so the live preview can find the new attachments
+      editorApi.current?.insert(links.join("\n") + "\n");
+      setStatus(`Uploaded ${links.length} file${links.length === 1 ? "" : "s"}`);
+    } catch (e) {
+      setStatus("Upload failed: " + String((e as Error).message ?? e));
+    }
+  };
   const copyMine = () => navigator.clipboard?.writeText(draft ?? content).then(() => setStatus("Your text was copied"), () => setStatus("Could not copy"));
 
   // folders that exist (from files and empty-folder entries) for the "new page" dialog
@@ -435,6 +451,26 @@ export function App() {
         const next = ["index.md", "README.md", "Home.md", "Welcome.md"].find((h) => h !== gone && files.includes(h)) ?? files.find((f) => f !== gone);
         if (next) go(next);
         else location.hash = "";
+      });
+    if (dlg.kind === "renameFolder")
+      return runDlg(async () => {
+        const from = dlg.target!;
+        const to = (dlg.value ?? "").trim().replace(/^\/+|\/+$/g, "");
+        if (!to || to === from) throw new Error("Enter a different folder path.");
+        await provider.renameDir!(from, to);
+        await refreshTree();
+        const re = (p: string) => (p.startsWith(from + "/") ? to + p.slice(from.length) : p);
+        setTabs((t) => {
+          const n = t.map(re);
+          store.set("tabs", n);
+          return n;
+        });
+        const parts = to.split("/");
+        setOpenNav((o) => new Set([...o, ...parts.map((_, i) => parts.slice(0, i + 1).join("/"))]));
+        if (current.startsWith(from + "/")) {
+          dirtyRef.current = false;
+          go(re(current));
+        }
       });
     if (dlg.kind === "deleteFolder")
       return runDlg(async () => {
@@ -618,9 +654,9 @@ export function App() {
           )}
           <div class="scroll">
             {layout === "doc" ? (
-              <NavMenu files={navEntries} open={openNav} toggle={toggleNav} current={current} onOpen={go} onDeleteFolder={canEdit ? (p) => openDlg({ kind: "deleteFolder", target: p }) : undefined} />
+              <NavMenu files={navEntries} open={openNav} toggle={toggleNav} current={current} onOpen={go} onRenameFolder={canEdit ? (p) => openDlg({ kind: "renameFolder", target: p, value: p }) : undefined} onDeleteFolder={canEdit ? (p) => openDlg({ kind: "deleteFolder", target: p }) : undefined} />
             ) : sideView === "tree" ? (
-              <Tree files={navEntries} open={open} toggle={toggle} current={current} onOpen={go} />
+              <Tree files={navEntries} open={open} toggle={toggle} current={current} onOpen={go} onRenameFolder={canEdit ? (p) => openDlg({ kind: "renameFolder", target: p, value: p }) : undefined} onDeleteFolder={canEdit ? (p) => openDlg({ kind: "deleteFolder", target: p }) : undefined} />
             ) : (
               shown.map((f) => (
                 <div class={"row file nav" + (f === current ? " active" : "")} onClick={() => go(f)}>
@@ -659,6 +695,25 @@ export function App() {
                   <button class="primary" disabled={!dirty || saving} title="Save this note (Ctrl/Cmd+S)" onClick={() => save()}>
                     <Icon name="save" size={15} /> {saving ? "Saving…" : "Save"}
                   </button>
+                  {provider?.upload && (
+                    <>
+                      <button title="Attach an image, PDF, audio or video file (you can also paste or drop files into the editor)" aria-label="Attach file" onClick={() => fileInput.current?.click()}>
+                        <Icon name="attach" size={15} /> Attach
+                      </button>
+                      <input
+                        ref={fileInput}
+                        type="file"
+                        multiple
+                        hidden
+                        accept="image/*,.pdf,.mp3,.mp4,.webm"
+                        onChange={(e) => {
+                          const el = e.target as HTMLInputElement;
+                          void uploadFiles([...(el.files ?? [])]);
+                          el.value = "";
+                        }}
+                      />
+                    </>
+                  )}
                   <button title="Throw away unsaved changes and stop editing" onClick={discard}>Discard</button>
                 </>
               )}
@@ -726,7 +781,7 @@ export function App() {
                 <div class="center muted">Loading…</div>
               ) : mode === "edit" && !selected ? (
                 <div class="edit-split">
-                  <Editor key={current + ":" + editorKey} value={text} onChange={setDraft} onSave={() => save()} />
+                  <Editor key={current + ":" + editorKey} value={text} onChange={setDraft} onSave={() => save()} onFiles={provider?.upload ? uploadFiles : undefined} apiRef={editorApi} />
                   <article class="md live" dangerouslySetInnerHTML={{ __html: html }} />
                 </div>
               ) : (
@@ -835,7 +890,7 @@ export function App() {
         <form class="modal" onClick={(e) => e.stopPropagation()} onSubmit={(e) => (e.preventDefault(), submitDlg())}>
           <div class="modal-head">
             <b>
-              {dlg.kind === "newPage" ? "New page" : dlg.kind === "newFolder" ? "New folder" : dlg.kind === "rename" ? "Rename or move page" : dlg.kind === "delete" ? "Delete page" : "Delete folder"}
+              {dlg.kind === "newPage" ? "New page" : dlg.kind === "newFolder" ? "New folder" : dlg.kind === "rename" ? "Rename or move page" : dlg.kind === "renameFolder" ? "Rename or move folder" : dlg.kind === "delete" ? "Delete page" : "Delete folder"}
             </b>
           </div>
           {dlg.kind === "newPage" && (
@@ -860,6 +915,14 @@ export function App() {
               <input type="text" ref={focusAndSelect} value={dlg.value ?? ""} onInput={(e) => setDlg({ ...dlg, value: (e.target as HTMLInputElement).value })} />
             </label>
           )}
+          {dlg.kind === "renameFolder" && (
+            <>
+              <label class="dlg-field">New path for <b>{dlg.target}</b> (change the parent to move it)
+                <input type="text" ref={focusAndSelect} value={dlg.value ?? ""} onInput={(e) => setDlg({ ...dlg, value: (e.target as HTMLInputElement).value })} />
+              </label>
+              <div class="muted small">Every page and attachment inside moves with it. Links by page name keep working; links written with a full path do not.</div>
+            </>
+          )}
           {dlg.kind === "delete" && (
             <div>Delete <b>{current}</b>? It can be recovered from the version history or the recycle bin of your sync service, but links to it will break.</div>
           )}
@@ -868,7 +931,7 @@ export function App() {
           <div class="dlg-actions">
             <button type="button" disabled={dlgBusy} onClick={() => setDlg(null)}>Cancel</button>
             <button type="submit" class={dlg.kind === "delete" || dlg.kind === "deleteFolder" ? "danger" : "primary"} disabled={dlgBusy}>
-              {dlgBusy ? "Working…" : dlg.kind === "newPage" || dlg.kind === "newFolder" ? "Create" : dlg.kind === "rename" ? "Rename" : "Delete"}
+              {dlgBusy ? "Working…" : dlg.kind === "newPage" || dlg.kind === "newFolder" ? "Create" : dlg.kind === "rename" || dlg.kind === "renameFolder" ? "Rename" : "Delete"}
             </button>
           </div>
         </form>

@@ -22,11 +22,30 @@ function build(files: string[]): Node {
   return root;
 }
 
+/** Hover buttons on a folder row: rename or move (any folder) and delete (empty folders only). */
+function FolderActions({ path, empty, onRename, onDelete }: { path: string; empty: boolean; onRename?: (p: string) => void; onDelete?: (p: string) => void }) {
+  if (!onRename && !(onDelete && empty)) return null;
+  return (
+    <span class="row-acts">
+      {onRename && (
+        <button class="row-del" title="Rename or move this folder" aria-label="Rename folder" onClick={(e) => (e.stopPropagation(), onRename(path))}>
+          <Icon name="edit" size={13} />
+        </button>
+      )}
+      {onDelete && empty && (
+        <button class="row-del danger-hover" title="Delete this empty folder" aria-label="Delete empty folder" onClick={(e) => (e.stopPropagation(), onDelete(path))}>
+          <Icon name="trash" size={13} />
+        </button>
+      )}
+    </span>
+  );
+}
+
 function sorted(n: Node) {
   return [...n.children.values()].sort((a, b) => Number(a.file) - Number(b.file) || a.name.localeCompare(b.name));
 }
 
-function Branch({ node, depth, open, toggle, current, onOpen }: any) {
+function Branch({ node, depth, open, toggle, current, onOpen, onRenameFolder, onDeleteFolder }: any) {
   return (
     <>
       {sorted(node).map((c: Node) =>
@@ -42,8 +61,9 @@ function Branch({ node, depth, open, toggle, current, onOpen }: any) {
           <>
             <div class="row dir" style={{ paddingLeft: 8 + depth * 14 }} onClick={() => toggle(c.path)}>
               <span class="chev">{open.has(c.path) ? "▾" : "▸"}</span> {c.name}
+              <FolderActions path={c.path} empty={c.children.size === 0} onRename={onRenameFolder} onDelete={onDeleteFolder} />
             </div>
-            {open.has(c.path) && <Branch node={c} depth={depth + 1} open={open} toggle={toggle} current={current} onOpen={onOpen} />}
+            {open.has(c.path) && <Branch node={c} depth={depth + 1} open={open} toggle={toggle} current={current} onOpen={onOpen} onRenameFolder={onRenameFolder} onDeleteFolder={onDeleteFolder} />}
           </>
         ),
       )}
@@ -51,13 +71,13 @@ function Branch({ node, depth, open, toggle, current, onOpen }: any) {
   );
 }
 
-export function Tree(props: { files: string[]; open: Set<string>; toggle: (p: string) => void; current: string; onOpen: (p: string) => void }) {
+export function Tree(props: { files: string[]; open: Set<string>; toggle: (p: string) => void; current: string; onOpen: (p: string) => void; onRenameFolder?: (p: string) => void; onDeleteFolder?: (p: string) => void }) {
   return <Branch node={build(props.files)} depth={0} {...props} />;
 }
 
 const pretty = (s: string) => s.replace(/\.md$/, "");
 
-function NavBranch({ node, depth, open, toggle, current, onOpen, onDeleteFolder }: any) {
+function NavBranch({ node, depth, open, toggle, current, onOpen, onRenameFolder, onDeleteFolder }: any) {
   const kids = sorted(node);
   // inside a folder: pages first, then sub-sections. At the top level: folders first, loose pages below them.
   const files = kids.filter((k: Node) => k.file);
@@ -74,13 +94,9 @@ function NavBranch({ node, depth, open, toggle, current, onOpen, onDeleteFolder 
           <div class="nav-section">
             <div class={"nav-heading d" + Math.min(depth, 2)} style={{ paddingLeft: 14 + depth * 14 }} onClick={() => toggle(c.path)}>
               <span class="chev">{open.has(c.path) ? "▾" : "▸"}</span> {c.name}
-              {onDeleteFolder && c.children.size === 0 && (
-                <button class="row-del" title="Delete this empty folder" aria-label="Delete empty folder" onClick={(e) => (e.stopPropagation(), onDeleteFolder(c.path))}>
-                  <Icon name="trash" size={13} />
-                </button>
-              )}
+              <FolderActions path={c.path} empty={c.children.size === 0} onRename={onRenameFolder} onDelete={onDeleteFolder} />
             </div>
-            {open.has(c.path) && <NavBranch node={c} depth={depth + 1} open={open} toggle={toggle} current={current} onOpen={onOpen} onDeleteFolder={onDeleteFolder} />}
+            {open.has(c.path) && <NavBranch node={c} depth={depth + 1} open={open} toggle={toggle} current={current} onOpen={onOpen} onRenameFolder={onRenameFolder} onDeleteFolder={onDeleteFolder} />}
           </div>
         ),
       )}
@@ -89,6 +105,6 @@ function NavBranch({ node, depth, open, toggle, current, onOpen, onDeleteFolder 
 }
 
 /** Wiki/doc-site style navigation: folders are section headings (expanded by default), pages are links beneath. */
-export function NavMenu(props: { files: string[]; open: Set<string>; toggle: (p: string) => void; current: string; onOpen: (p: string) => void; onDeleteFolder?: (p: string) => void }) {
+export function NavMenu(props: { files: string[]; open: Set<string>; toggle: (p: string) => void; current: string; onOpen: (p: string) => void; onRenameFolder?: (p: string) => void; onDeleteFolder?: (p: string) => void }) {
   return <NavBranch node={build(props.files)} depth={0} {...props} />;
 }

@@ -261,9 +261,10 @@ Komodo variables work too: put the client ID or secret in Komodo Variables and r
 ### Editing on the hosted site
 Set `ALLOW_WRITE=1` on the server (it is off by default; the static Pages site is always read-only). In **Web** mode on a desktop browser you then get:
 - **Edit** on any page: a markdown editor with live preview, **Save** (or Ctrl/Cmd+S), **Discard**, and a warning before you leave with unsaved changes.
+- **Attachments:** paste or drop an image (or PDF, mp3, mp4, webm) into the editor, or use **Attach**. It is uploaded to your vault's attachment folder (the `attachmentFolderPath` from `.obsidian/app.json`, or `ATTACHMENT_FOLDER`), named like Obsidian does (`Pasted image 20260926143553.png` for clipboard images, a numeric suffix if the name is taken), and an `![[embed]]` is inserted at the cursor. 10 MB per file; other file types are refused.
 - **Page** and **Folder** buttons at the top of the navigation to create pages and folders (new folders are created as needed; a new page opens straight in the editor).
-- **Rename** (also moves a page to another folder) and **Delete** on the page toolbar, and a trash icon on empty folders in the navigation.
-- Phones are view-only for now.
+- **Rename** (also moves a page to another folder) and **Delete** on the page toolbar. Hovering a folder in the navigation (either mode) shows **rename or move** and, for empty folders, **delete**. Renaming a folder moves everything inside it.
+- **Phones can edit too**: the editor takes the full width (use **Preview** to see the result) and Attach works with the camera roll.
 
 **Conflicts.** When you save, the server first checks the stored version of the note. If it changed since you opened it (for example you edited it in Obsidian meanwhile), nothing is saved and you get a warning with **Show differences**, **Overwrite with my version**, **Load their version**, **Copy my text** and **Keep editing**.
 
@@ -271,9 +272,11 @@ Set `ALLOW_WRITE=1` on the server (it is off by default; the static Pages site i
 
 **With git**, each change is a commit in your vault repository, authored by the signed-in person (`Name <email>`) with the server's own git identity as committer (pushing is up to you). Empty folders exist only on disk until a page is added.
 
-**Safety.** Every signed-in user can edit (roles are on the roadmap). Writes only touch `.md` files, refuse odd paths, are limited to 2 MB per note, and refuse requests that come from another website. Not covered yet: uploading images or PDFs, renaming folders, and the Obsidian-mode file tree's folder delete.
+**Safety.** Every signed-in user can edit (roles are on the roadmap). Writes only touch `.md` files, refuse odd paths, are limited to 2 MB per note, and refuse requests that come from another website. Not covered yet: replacing or deleting attachments, and editing on the static GitHub Pages site.
 
-> Verified against the mock FNS (`scripts/mock-fns.mjs` with `MOCK_WRITE=1`: create, edit, conflict, overwrite, rename, delete, folders, permission errors) and against a git repository. Try it first on a scratch page in your real vault.
+**Folder rename with FNS** has no single FNS call, so the server moves each note and attachment one at a time and then removes the old folder. If FNS refuses part-way, you get an error saying how many items moved and the rest stay where they were.
+
+> Verified against the mock FNS (`scripts/mock-fns.mjs` with `MOCK_WRITE=1`: create, edit, conflict, overwrite, rename, delete, folders, uploads, folder rename, permission errors) and against a git repository. Try it first on a scratch page in your real vault.
 
 ---
 
@@ -311,10 +314,9 @@ Ideas to revisit, not commitments.
   - Connection data such as tokens must be **stored encrypted**, so it can't be scraped from the Docker data volume.
 - **OIDC role support.** Today every signed-in user has the same access. Admin would be the base level, with custom role names configurable.
   - Set FNS vault access **per connection by role**.
-- **Editing on the hosted site.** First version done (see [Editing on the hosted site](#editing-on-the-hosted-site)). Still to do:
-  - Uploading and pasting images and other attachments.
-  - Renaming folders, and folder delete in the Obsidian-mode file tree.
-  - Editing on phones.
+- **Editing on the hosted site.** Done: edit, new page and folder, rename, delete, conflict warning, attachment upload, folder rename and delete, editing on phones (see [Editing on the hosted site](#editing-on-the-hosted-site)). Still to do:
+  - Replacing and deleting attachments.
+  - Editing on the static GitHub Pages site through the GitHub API (needs a personal access token in the browser).
   - Editing permission by role (needs the roles work below).
 
 ### Both modes
@@ -324,7 +326,6 @@ Ideas to revisit, not commitments.
   - An option to use the Obsidian layout on a phone (today phones always get the Web layout).
   - Installable web app (home-screen icon, offline reading).
   - PDFs on iOS only show the first page inside a frame, so open them in a new tab or a dedicated viewer.
-  - Editing on a phone, once hosted-site editing exists.
 
 ## Contributing
 Issues and PRs are welcome. `npm run typecheck` checks the app and server. GitHub Actions runs the typecheck and build on pull requests (`ci.yml`), and the Pages workflow typechecks before it deploys `main`, so a type error fails the build instead of shipping.

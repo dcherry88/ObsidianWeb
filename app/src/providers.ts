@@ -67,6 +67,20 @@ export class ApiProvider implements VaultProvider {
   rename = (from: string, to: string) => mutate("POST", "./api/rename", { from, to });
   remove = (path: string) => mutate("DELETE", `./api/file?path=${encodeURIComponent(path)}`);
   removeDir = (path: string) => mutate("DELETE", `./api/folder?path=${encodeURIComponent(path)}`);
+  renameDir = (from: string, to: string) => mutate("POST", "./api/rename-folder", { from, to });
+  upload = async (note: string, file: File) => {
+    const form = new FormData();
+    form.set("note", note);
+    form.set("file", file, file.name || "image.png");
+    const r = await fetch("./api/upload", { method: "POST", body: form });
+    if (r.status === 401) {
+      location.assign("./auth/login?next=" + encodeURIComponent(location.pathname));
+      throw new Error("Signing in…");
+    }
+    const j = await r.json().catch(() => ({}) as any);
+    if (!r.ok) throw new Error(j.error || `${r.status} upload failed`);
+    return { path: j.path as string, name: j.name as string };
+  };
 }
 
 /** GitHub Pages: vault files + index.json are copied into the site at build time; history comes from the GitHub API. */

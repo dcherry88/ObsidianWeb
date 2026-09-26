@@ -363,3 +363,19 @@ button.danger { background: #e5484d; color: #fff; border-color: transparent; }
 .dlg-err { color: #e5484d; }
 .dlg-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .toolbar button { display: inline-flex; align-items: center; gap: 6px; }
+
+/* folder row actions, phone editing */
+.row.dir, .nav-heading { display: flex; align-items: center; }
+.row-acts { margin-left: auto; display: inline-flex; gap: 2px; }
+.row-acts .row-del { margin-left: 0; }
+.row.dir:hover .row-del, .nav-heading:hover .row-del { opacity: 1; }
+.row-del.danger-hover:hover { color: #e5484d; }
+@media (max-width: 800px) {
+  .edit-split .live { display: none; }         /* phones edit full width; use Preview to see the result */
+  .edit-split .editor { border-right: 0; }
+  .row-del { opacity: 0.7; }                   /* no hover on touch screens */
+  .toolbar { flex-wrap: wrap; row-gap: 6px; }
+}
+@media (max-width: 800px) {
+  .app.web .toolbar button, .toolbar button { min-height: 34px; padding: 4px 10px; font-size: 13px; }
+}

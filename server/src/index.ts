@@ -1,10 +1,10 @@
 import { Hono, type Context } from "hono";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import type { AppConfig } from "../../shared/types";
-import { type Actor, type Backend, ConflictError, ExistsError, GitBackend, NotEmptyError, NotFoundError, checkNewPath, safePath } from "./backend";
+import { type Actor, type Backend, ConflictError, ExistsError, GitBackend, MAX_UPLOAD_BYTES, NotEmptyError, NotFoundError, attachmentFolder, attachmentName, checkNewPath, safePath } from "./backend";
 import { FnsBackend } from "./fns";
 import { setupAuth } from "./auth";
 
@@ -130,7 +130,7 @@ function failed(c: Context, e: unknown): Response {
   if (e instanceof NotEmptyError) return c.json({ notEmpty: true, error: "folder is not empty" }, 409);
   if (e instanceof NotFoundError) return c.json({ error: "not found" }, 404);
   const msg = (e as Error)?.message ?? "";
-  if (msg === "bad path" || msg.startsWith("notes must")) return c.json({ error: msg }, 400);
+  if (msg === "bad path" || msg.startsWith("notes must") || msg.startsWith("file type")) return c.json({ error: msg }, 400);
   console.error("[edit]", msg);
   return c.json({ error: "the change could not be saved: " + msg.slice(0, 500) }, 502);
 }
@@ -180,6 +180,46 @@ app.post("/api/rename", async (c) => {
     const to = checkNewPath(b?.to ?? "", "note");
     await backend.rename!(from, to, who(c));
     return c.json({ ok: true, path: to });
+  } catch (e) {
+    return failed(c, e);
+  }
+});
+
+app.post("/api/rename-folder", async (c) => {
+  const denied = writeGuard(c);
+  if (denied) return denied;
+  const b = await body<{ from: string; to: string }>(c);
+  try {
+    const from = checkNewPath(b?.from ?? "", "folder");
+    const to = checkNewPath(b?.to ?? "", "folder");
+    await backend.renameDir!(from, to, who(c));
+    return c.json({ ok: true, path: to });
+  } catch (e) {
+    return failed(c, e);
+  }
+});
+
+// Attachment upload (images, PDFs, audio, video) from the editor: paste, drop, or the Attach button.
+app.post("/api/upload", async (c) => {
+  const denied = writeGuard(c);
+  if (denied) return denied;
+  try {
+    const form = await c.req.parseBody();
+    const file = form["file"];
+    const note = typeof form["note"] === "string" ? (form["note"] as string) : "";
+    if (!(file instanceof File)) return c.json({ error: "no file" }, 400);
+    if (file.size > MAX_UPLOAD_BYTES) return c.json({ error: `file is too large (${MAX_UPLOAD_BYTES / 1024 / 1024} MB limit)` }, 413);
+    const name = attachmentName(file.name);
+    const folder = attachmentFolder((await obsidianSettings())?.attachmentFolderPath, note && note.endsWith(".md") ? checkNewPath(note, "note") : "x.md");
+    const taken = async (p: string) => stat(safePath(VAULT, p)).then(() => true, () => false);
+    let dest = [folder, name].filter(Boolean).join("/");
+    for (let n = 1; (await taken(dest)) && n < 100; n++) {
+      const dot = name.lastIndexOf(".");
+      dest = [folder, `${name.slice(0, dot)} ${n}${name.slice(dot)}`].filter(Boolean).join("/");
+    }
+    checkNewPath(dest, "folder"); // path sanity (no traversal, no hidden folders)
+    await backend.upload!(dest, Buffer.from(await file.arrayBuffer()), who(c));
+    return c.json({ ok: true, path: dest, name: dest.split("/").pop() });
   } catch (e) {
     return failed(c, e);
   }

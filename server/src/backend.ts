@@ -26,6 +26,9 @@ export interface Backend {
   rename?(from: string, to: string, actor?: Actor): Promise<void>;
   remove?(rel: string, actor?: Actor): Promise<void>;
   removeDir?(rel: string, actor?: Actor): Promise<void>;
+  renameDir?(from: string, to: string, actor?: Actor): Promise<void>;
+  /** store an uploaded attachment at rel (the caller already chose a free name) */
+  upload?(rel: string, data: Buffer, actor?: Actor): Promise<void>;
 }
 
 /** Who is making an edit (from the signed-in OIDC identity), so it can be attributed in FNS logs or git history. */
@@ -179,6 +182,29 @@ export class GitBackend implements Backend {
     await this.commit(`Delete ${rel}`, actor, rel);
   }
 
+  async renameDir(from: string, to: string, actor?: Actor) {
+    const src = safePath(this.root, from);
+    const dst = safePath(this.root, to);
+    if (!(await stat(src).then((s) => s.isDirectory(), () => false))) throw new NotFoundError();
+    if (await stat(dst).then(() => true, () => false)) throw new ExistsError();
+    if (to.startsWith(from + "/")) throw new Error("bad path");
+    await mkdir(path.dirname(dst), { recursive: true });
+    try {
+      await this.git("mv", "--", from, to); // tracked files move together
+    } catch {
+      await rename(src, dst); // folder with nothing tracked yet
+    }
+    await this.commit(`Rename folder ${from} to ${to}`, actor, from, to);
+  }
+
+  async upload(rel: string, data: Buffer, actor?: Actor) {
+    const abs = safePath(this.root, rel);
+    await mkdir(path.dirname(abs), { recursive: true });
+    await writeFile(abs, data);
+    await this.git("add", "--", rel);
+    await this.commit(`Add ${rel}`, actor, rel);
+  }
+
   async removeDir(rel: string) {
     const abs = safePath(this.root, rel);
     if ((await readdir(abs).catch(() => ["x"])).length) throw new NotEmptyError();
@@ -199,4 +225,32 @@ export async function walk(root: string, dir = "", dirs = false): Promise<string
     } else out.push(rel);
   }
   return out;
+}
+
+export const UPLOAD_TYPES = ["png", "jpg", "jpeg", "gif", "webp", "avif", "svg", "pdf", "mp3", "mp4", "webm"];
+export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+
+/** A safe file name for an uploaded attachment; clipboard screenshots get Obsidian's "Pasted image <timestamp>" name. */
+export function attachmentName(original: string): string {
+  const base = original.split(/[\\/]/).pop() ?? "";
+  const dot = base.lastIndexOf(".");
+  const ext = (dot > 0 ? base.slice(dot + 1) : "").toLowerCase();
+  if (!UPLOAD_TYPES.includes(ext)) throw new Error(`file type .${ext || "?"} is not allowed`);
+  let stem = base.slice(0, dot).replace(/[^\p{L}\p{N} ._()-]+/gu, "-").replace(/^[.\s-]+/, "").trim().slice(0, 100);
+  if (!stem || /^image$/i.test(stem)) {
+    const d = new Date();
+    const p = (n: number) => String(n).padStart(2, "0");
+    stem = `Pasted image ${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+  }
+  return `${stem}.${ext}`;
+}
+
+/** Where an attachment goes, following the vault's "attachmentFolderPath" setting (Obsidian semantics). */
+export function attachmentFolder(setting: string | undefined, notePath: string): string {
+  const noteDir = notePath.includes("/") ? notePath.slice(0, notePath.lastIndexOf("/")) : "";
+  const s = (setting ?? "").trim();
+  if (!s || s === "/") return "";
+  if (s === "." || s === "./") return noteDir;
+  if (s.startsWith("./")) return [noteDir, s.slice(2)].filter(Boolean).join("/");
+  return s.replace(/^\/+|\/+$/g, "");
 }

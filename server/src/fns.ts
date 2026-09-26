@@ -84,13 +84,13 @@ export class FnsBackend implements Backend {
     return fetch(u, { headers: this.headers() });
   }
 
-  private async api<T>(p: string, query: Record<string, string | number | boolean | undefined>, init?: { method: string; body?: unknown; actor?: Actor }): Promise<T> {
+  private async api<T>(p: string, query: Record<string, string | number | boolean | undefined>, init?: { method: string; body?: unknown; form?: FormData; actor?: Actor }): Promise<T> {
     const u = new URL(this.o.url.replace(/\/$/, "") + p);
     for (const [k, v] of Object.entries(query)) if (v !== undefined) u.searchParams.set(k, String(v));
     const res = await fetch(u, {
       method: init?.method ?? "GET",
-      headers: this.headers(init?.actor, init?.body !== undefined),
-      body: init?.body !== undefined ? JSON.stringify(init.body) : undefined,
+      headers: this.headers(init?.actor, init?.body !== undefined), // multipart sets its own content type
+      body: init?.form ?? (init?.body !== undefined ? JSON.stringify(init.body) : undefined),
     });
     if (!res.ok) throw new Error(`${p}: HTTP ${res.status}`);
     const j = (await res.json()) as { code?: number; status?: boolean; message?: string; data?: T };
@@ -317,5 +317,59 @@ export class FnsBackend implements Backend {
     if ((await readdir(abs).catch(() => ["x"])).length) throw new NotEmptyError();
     await this.api("/api/folder", {}, { method: "DELETE", actor, body: { vault: this.o.vault, path: rel } });
     await rm(abs, { recursive: true, force: true });
+  }
+
+  async upload(rel: string, data: Buffer, actor?: Actor) {
+    if (!this.canWrite) throw new Error("writes disabled");
+    const abs = safePath(this.o.mirrorDir, rel);
+    await this.settled();
+    const now = String(Date.now());
+    const form = new FormData();
+    form.set("vault", this.o.vault);
+    form.set("path", rel);
+    form.set("ctime", now);
+    form.set("mtime", now);
+    form.set("file", new Blob([new Uint8Array(data)]), rel.split("/").pop());
+    const saved = await this.api<{ contentHash?: string }>("/api/file", {}, { method: "POST", form, actor });
+    await mkdir(path.dirname(abs), { recursive: true });
+    await writeFile(abs, data);
+    if (saved?.contentHash) await this.setState((st) => void (st[`f:${rel}`] = String(saved.contentHash)));
+  }
+
+  /** FNS has no folder-rename call, so move every note and attachment inside, one by one, then drop the old folder. */
+  async renameDir(from: string, to: string, actor?: Actor) {
+    if (!this.canWrite) throw new Error("writes disabled");
+    const src = safePath(this.o.mirrorDir, from);
+    const dst = safePath(this.o.mirrorDir, to);
+    if (to.startsWith(from + "/")) throw new Error("bad path");
+    if (!(await stat(src).then((s) => s.isDirectory(), () => false))) throw new NotFoundError();
+    if (await stat(dst).then(() => true, () => false)) throw new ExistsError();
+    await this.settled();
+    const inner = await walk(src, "", false);
+    let moved = 0;
+    try {
+      for (const f of inner) {
+        const oldPath = `${from}/${f}`;
+        const newPath = `${to}/${f}`;
+        const isNote = f.toLowerCase().endsWith(".md");
+        await this.api(isNote ? "/api/note/rename" : "/api/file/rename", {}, { method: "POST", actor, body: { vault: this.o.vault, oldPath, path: newPath } });
+        await mkdir(path.dirname(path.join(this.o.mirrorDir, newPath)), { recursive: true });
+        await fsRename(path.join(this.o.mirrorDir, oldPath), path.join(this.o.mirrorDir, newPath)).catch(() => {});
+        await this.setState((st) => {
+          const k = isNote ? "n" : "f";
+          if (`${k}:${oldPath}` in st) {
+            st[`${k}:${newPath}`] = st[`${k}:${oldPath}`];
+            delete st[`${k}:${oldPath}`];
+          }
+        });
+        moved++;
+      }
+    } catch (e) {
+      throw new Error(`Renamed ${moved} of ${inner.length} items, then FNS refused: ${(e as Error).message}`);
+    }
+    if (!inner.length) await this.api("/api/folder", {}, { method: "POST", actor, body: { vault: this.o.vault, path: to } });
+    await mkdir(dst, { recursive: true });
+    await this.api("/api/folder", {}, { method: "DELETE", actor, body: { vault: this.o.vault, path: from } }).catch(() => {});
+    await rm(src, { recursive: true, force: true });
   }
 }

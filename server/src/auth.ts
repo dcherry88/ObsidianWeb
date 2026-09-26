@@ -1,6 +1,8 @@
 // OIDC login (authorization code + PKCE). Every user who signs in gets the same access.
 import * as oidc from "openid-client";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import type { Context, Hono, MiddlewareHandler } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 
@@ -33,7 +35,7 @@ export interface Auth {
   userOf(c: Context): SessionUser | undefined;
 }
 
-export function setupAuth(app: Hono, env: AuthEnv): Auth {
+export function setupAuth(app: Hono, env: AuthEnv, sessionFile?: string): Auth {
   if (!env.OIDC_ISSUER) return { enabled: false, userOf: () => undefined };
   if (!env.OIDC_CLIENT_ID || !env.PUBLIC_URL) {
     throw new Error("OIDC_ISSUER is set, so OIDC_CLIENT_ID and PUBLIC_URL (for example https://notes.example.com) are required");
@@ -46,7 +48,35 @@ export function setupAuth(app: Hono, env: AuthEnv): Auth {
   const ttlMs = Number(env.SESSION_TTL_HOURS ?? 168) * 3600_000;
   const insecure = ["1", "true"].includes(env.OIDC_ALLOW_INSECURE ?? "");
 
+  // Sessions are keyed by a hash of the cookie value and saved to disk, so a restart or redeploy doesn't sign everyone out.
+  // Only the hash is stored: a copy of the data file can't be used to impersonate anyone.
+  const hashId = (sid: string) => createHash("sha256").update(sid).digest("base64url");
   const sessions = new Map<string, Session>();
+  if (sessionFile) {
+    try {
+      const saved = JSON.parse(readFileSync(sessionFile, "utf8")) as Record<string, Session>;
+      const now = Date.now();
+      for (const [k, v] of Object.entries(saved)) if (v.exp > now) sessions.set(k, v);
+      if (sessions.size) console.log(`[auth] restored ${sessions.size} session(s)`);
+    } catch {
+      /* no saved sessions yet */
+    }
+  }
+  let saveTimer: NodeJS.Timeout | undefined;
+  const persist = () => {
+    if (!sessionFile || saveTimer) return;
+    saveTimer = setTimeout(() => {
+      saveTimer = undefined;
+      try {
+        mkdirSync(path.dirname(sessionFile), { recursive: true });
+        const tmp = sessionFile + ".tmp";
+        writeFileSync(tmp, JSON.stringify(Object.fromEntries(sessions)), { mode: 0o600 });
+        renameSync(tmp, sessionFile);
+      } catch (e) {
+        console.warn("[auth] could not save sessions (they will be lost on restart):", (e as Error).message);
+      }
+    }, 300);
+  };
   const pending = new Map<string, { verifier: string; next: string; exp: number }>();
 
   // Discovery is lazy and retried, so the app can start before the identity provider is reachable.
@@ -67,13 +97,15 @@ export function setupAuth(app: Hono, env: AuthEnv): Auth {
 
   setInterval(() => {
     const now = Date.now();
-    for (const [k, v] of sessions) if (v.exp < now) sessions.delete(k);
+    let dropped = false;
+    for (const [k, v] of sessions) if (v.exp < now) (sessions.delete(k), (dropped = true));
+    if (dropped) persist();
     for (const [k, v] of pending) if (v.exp < now) pending.delete(k);
   }, 60_000).unref();
 
   const userOf = (c: Context): SessionUser | undefined => {
     const sid = getCookie(c, COOKIE);
-    const s = sid ? sessions.get(sid) : undefined;
+    const s = sid ? sessions.get(hashId(sid)) : undefined;
     return s && s.exp > Date.now() ? s.user : undefined;
   };
 
@@ -112,7 +144,7 @@ export function setupAuth(app: Hono, env: AuthEnv): Auth {
       const claims = tokens.claims();
       if (!claims) throw new Error("no ID token returned");
       const sid = rid();
-      sessions.set(sid, {
+      sessions.set(hashId(sid), {
         user: {
           sub: claims.sub,
           name: (claims.name as string) ?? (claims.preferred_username as string) ?? undefined,
@@ -120,6 +152,7 @@ export function setupAuth(app: Hono, env: AuthEnv): Auth {
         },
         exp: Date.now() + ttlMs,
       });
+      persist();
       setCookie(c, COOKIE, sid, { httpOnly: true, sameSite: "Lax", secure, path: "/", maxAge: Math.floor(ttlMs / 1000) });
       return c.redirect(p.next);
     } catch (e) {
@@ -130,7 +163,7 @@ export function setupAuth(app: Hono, env: AuthEnv): Auth {
 
   app.get("/auth/logout", (c) => {
     const sid = getCookie(c, COOKIE);
-    if (sid) sessions.delete(sid);
+    if (sid && sessions.delete(hashId(sid))) persist();
     deleteCookie(c, COOKIE, { path: "/" });
     return c.html('<!doctype html><meta charset="utf-8"><title>Signed out</title><body style="font-family:system-ui;display:grid;place-items:center;height:100vh"><div>You are signed out. <a href="/auth/login">Sign in again</a></div>');
   });

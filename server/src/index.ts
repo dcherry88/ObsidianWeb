@@ -42,7 +42,7 @@ if (SOURCE === "fns") {
 }
 
 const app = new Hono();
-const auth = setupAuth(app, env); // no-op unless OIDC_ISSUER is set
+const auth = setupAuth(app, env, path.join(DATA_DIR, "sessions.json")); // no-op unless OIDC_ISSUER is set
 
 app.get("/healthz", (c) => c.text("ok"));
 

@@ -31,6 +31,8 @@ jobs:
           ref: ${{ vars.VAULT_BRANCH }}
           path: vault-external
       - run: npm install
+      - name: Typecheck
+        run: npm run typecheck
       - run: npm run build:static
         env:
           VAULT_DIR: ${{ vars.VAULT_REPO != '' && 'vault-external' || 'vault' }}

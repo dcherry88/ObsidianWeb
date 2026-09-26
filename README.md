@@ -188,9 +188,9 @@ Set `OIDC_ISSUER` and the server requires sign-in for everything except `/health
 | `SESSION_TTL_HOURS` | Default `168` (7 days) |
 | `OIDC_ALLOW_INSECURE` | `1` to allow a plain-HTTP issuer (local testing only) |
 
-Sessions are kept in server memory, so a restart signs everyone out (they just sign in again). Sign out is in **Settings**. Behind a reverse proxy, forward everything to the container and make sure `PUBLIC_URL` is the public HTTPS address.
+Sessions are saved to `DATA_DIR/sessions.json` (mode 600, `/data` in Docker), so restarts and redeploys don't sign anyone out as long as that folder persists. Only a hash of each session ID is stored, so a copy of the file can't be used to impersonate a user. Deleting the file signs everyone out. Sign out is in **Settings**. Behind a reverse proxy, forward everything to the container and make sure `PUBLIC_URL` is the public HTTPS address.
 
-> Tested against a small mock OIDC provider (`scripts/mock-oidc.mjs`): login, callback, session, logout, replay protection, 401 for API calls. Not yet tested against Pocket ID itself.
+> Tested against a small mock OIDC provider (`scripts/mock-oidc.mjs`): login, callback, session, session persistence across restarts, logout, replay protection, 401 for API calls. Also used in production with Pocket ID.
 
 ---
 
@@ -308,7 +308,7 @@ Ideas to revisit, not commitments.
   - Editing on a phone, once hosted-site editing exists.
 
 ## Contributing
-Issues and PRs are welcome. `npm run typecheck` checks the app and server.
+Issues and PRs are welcome. `npm run typecheck` checks the app and server. GitHub Actions runs the typecheck and build on pull requests (`ci.yml`), and the Pages workflow typechecks before it deploys `main`, so a type error fails the build instead of shipping.
 
 ## License
 [MIT](LICENSE) © 2026 Danny Cherry. Fork and modify freely. Third-party dependencies keep their own licenses (MIT, BSD, Apache-2.0, MPL-2.0).

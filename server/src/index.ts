@@ -48,7 +48,7 @@ async function history(file: string): Promise<Commit[]> {
 
 const app = new Hono();
 
-app.get("/config.json", (c) => c.json({ mode: "server", canWrite: ALLOW_WRITE } satisfies AppConfig));
+app.get("/config.json", (c) => c.json({ mode: "server", canWrite: ALLOW_WRITE, defaultLayout: process.env.DEFAULT_LAYOUT === "vault" ? "vault" : "doc" } satisfies AppConfig));
 
 app.get("/api/tree", async (c) => c.json(await tree()));
 

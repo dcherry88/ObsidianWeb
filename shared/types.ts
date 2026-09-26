@@ -8,6 +8,8 @@ export interface Commit {
 export interface AppConfig {
   mode: "server" | "static";
   canWrite: boolean;
+  /** initial layout when the user has no saved preference */
+  defaultLayout?: "doc" | "vault";
   /** static mode only: GitHub repo used for history, e.g. "owner/repo" */
   repo?: string;
   branch?: string;

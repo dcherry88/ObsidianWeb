@@ -72,3 +72,30 @@ pre.fm { font-size: 12px; color: var(--muted); border: 1px solid var(--border); 
 .hljs-title, .hljs-function { color: #82aaff; }
 
 @media (max-width: 800px) { .right { display: none; } .side { width: 200px; } }
+
+/* Doc Site layout */
+.site-title { padding: 14px 14px 6px; font-weight: 600; font-size: 16px; }
+.nav-item { padding: 4px 14px; cursor: pointer; color: var(--fg); border-left: 2px solid transparent; }
+.nav-item:hover { background: var(--bg3); }
+.nav-item.active { border-left-color: var(--accent); color: var(--accent); background: var(--bg3); font-weight: 500; }
+.nav-heading { padding: 10px 14px 3px; cursor: pointer; user-select: none; color: var(--muted); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
+.nav-heading.d1, .nav-heading.d2 { text-transform: none; font-size: 12px; letter-spacing: 0; }
+.doc-mode .side { width: 270px; }
+.doc-mode .md { max-width: 820px; padding-top: 28px; }
+.doc-mode .toolbar { border-bottom: 0; }
+.raw { margin: 0; padding: 16px 24px 80px; white-space: pre-wrap; word-break: break-word; font: 13px/1.55 ui-monospace, Menlo, monospace; }
+
+/* Split panes (Obsidian mode) */
+.panes { flex: 1; display: flex; min-height: 0; }
+.pane { flex: 1; min-width: 0; min-height: 0; }
+.split-pane { display: flex; flex-direction: column; border-left: 1px solid var(--border); }
+.split-head { display: flex; gap: 6px; align-items: center; padding: 6px 10px; background: var(--bg2); border-bottom: 1px solid var(--border); }
+.split-head select { max-width: 180px; background: var(--bg3); color: var(--fg); border: 1px solid var(--border); border-radius: 4px; }
+.edit-split { display: flex; height: 100%; }
+.edit-split .editor { flex: 1; min-width: 0; border-right: 1px solid var(--border); }
+.edit-split .live { flex: 1; min-width: 0; margin: 0; max-width: none; overflow: auto; height: 100%; }
+.tab .x[title^="Open"] { margin-left: 6px; }
+.split-head { min-width: 0; }
+.split-head .crumb { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.split-head select { min-width: 0; max-width: 90px; }
+.toolbar { flex-wrap: wrap; }

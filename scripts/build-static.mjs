@@ -26,6 +26,6 @@ const repo = process.env.GITHUB_REPOSITORY ?? "dcherry88/ObsidianWeb";
 const branch = process.env.GITHUB_REF_NAME ?? "main";
 writeFileSync(
   path.join(dist, "config.json"),
-  JSON.stringify({ mode: "static", canWrite: false, repo, branch, vaultPath: vaultDir }),
+  JSON.stringify({ mode: "static", canWrite: false, defaultLayout: process.env.DEFAULT_LAYOUT === "vault" ? "vault" : "doc", repo, branch, vaultPath: vaultDir }),
 );
 console.log(`static build: ${md.length} notes, repo=${repo}@${branch}`);

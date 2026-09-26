@@ -11,6 +11,7 @@ async function ok(r: Response): Promise<Response> {
 export class ApiProvider implements VaultProvider {
   constructor(public canWrite: boolean) {}
   tree = async () => (await ok(await fetch("./api/tree"))).json() as Promise<string[]>;
+  assetUrl = (path: string) => `./api/raw?path=${encodeURIComponent(path)}`;
   read = async (path: string, ref?: string) =>
     (await ok(await fetch(`./api/file?path=${encodeURIComponent(path)}${ref ? `&ref=${ref}` : ""}`))).text();
   history = async (path: string) =>
@@ -34,6 +35,7 @@ export class StaticProvider implements VaultProvider {
     return (this.cfg.vaultPath ?? "vault").replace(/^\/|\/$/g, "");
   }
   tree = async () => (await ok(await fetch("./index.json"))).json() as Promise<string[]>;
+  assetUrl = (path: string) => `./vault/${enc(path)}`;
   read = async (path: string, ref?: string) => {
     const url = ref
       ? `https://raw.githubusercontent.com/${this.cfg.repo}/${ref}/${enc(`${this.vaultDir}/${path}`)}`

@@ -2,9 +2,10 @@ import { useEffect, useMemo, useState } from "preact/hooks";
 import { diffLines } from "diff";
 import type { AppConfig, Commit, VaultProvider } from "../../shared/types";
 import { loadProvider } from "./providers";
-import { outline, renderMarkdown, slug, splitFrontmatter } from "./md";
+import { outline, renderMarkdown, slug, splitFrontmatter, type RenderCtx } from "./md";
 import { Editor } from "./Editor";
 import { NavMenu, Tree } from "./Tree";
+import { Search } from "./Search";
 
 const store = {
   get: <T,>(k: string, d: T): T => {
@@ -27,9 +28,22 @@ const store = {
 const pathFromHash = () => decodeURIComponent(location.hash.replace(/^#\/?/, ""));
 const title = (p: string) => p.split("/").pop()!.replace(/\.md$/, "");
 
+function RibbonBtn(p: { icon: string; label: string; tip: string; on?: boolean; onClick: () => void }) {
+  return (
+    <button class={"rbtn" + (p.on ? " on" : "")} title={p.tip} aria-label={p.tip} onClick={p.onClick}>
+      <span class="ico">{p.icon}</span>
+      <span class="lbl">{p.label}</span>
+    </button>
+  );
+}
+
 export function App() {
   const [boot, setBoot] = useState<{ cfg: AppConfig; provider: VaultProvider } | null>(null);
-  const [files, setFiles] = useState<string[]>([]);
+  const [allFiles, setFiles] = useState<string[]>([]);
+  const files = useMemo(() => allFiles.filter((f) => f.endsWith(".md")), [allFiles]);
+  const [theme, setTheme] = useState<string>(store.get("theme", "system"));
+  const [accent, setAccent] = useState<string>(store.get("accent", ""));
+  const [showSettings, setShowSettings] = useState(false);
   const [err, setErr] = useState("");
 
   const [current, setCurrent] = useState(pathFromHash());
@@ -60,7 +74,7 @@ export function App() {
         setFiles(t);
         if (!localStorage.getItem("ow:layout") && b.cfg.defaultLayout) setLayout(b.cfg.defaultLayout);
         if (!pathFromHash()) {
-          const home = ["index.md", "README.md", "Home.md", "Welcome.md"].find((h) => t.includes(h)) ?? t[0];
+          const home = ["index.md", "README.md", "Home.md", "Welcome.md"].find((h) => t.includes(h)) ?? t.find((f) => f.endsWith(".md"));
           if (home) location.replace("#/" + home.split("/").map(encodeURIComponent).join("/"));
         }
       })
@@ -120,8 +134,18 @@ export function App() {
       store.set("closedNav", [...n]);
       return n;
     });
-  const html = useMemo(() => renderMarkdown(selected ? oldContent : text, files), [text, files, selected, oldContent]);
-  const splitHtml = useMemo(() => (split ? renderMarkdown(splitContent, files) : ""), [split, splitContent, files]);
+  const ctxFor = (p: string): RenderCtx | undefined =>
+    provider && { all: allFiles, current: p, attachmentFolder: boot?.cfg.obsidian?.attachmentFolderPath, assetUrl: provider.assetUrl };
+  const html = useMemo(() => renderMarkdown(selected ? oldContent : text, files, ctxFor(current)), [text, files, allFiles, selected, oldContent, current, boot]);
+  const splitHtml = useMemo(() => (split ? renderMarkdown(splitContent, files, ctxFor(split)) : ""), [split, splitContent, files, allFiles, boot]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    theme === "system" ? root.removeAttribute("data-theme") : root.setAttribute("data-theme", theme);
+    accent ? root.style.setProperty("--accent", accent) : root.style.removeProperty("--accent");
+    store.set("theme", theme);
+    store.set("accent", accent);
+  }, [theme, accent]);
   const heads = useMemo(() => outline(splitFrontmatter(text).body), [text]);
   const fm = splitFrontmatter(text).fm;
 
@@ -162,21 +186,78 @@ export function App() {
   const diff = selected ? diffLines(oldContent, text) : null;
 
   return (
-    <div class={"shell " + (layout === "doc" ? "doc-mode" : "vault-mode")}>
-      <div class="ribbon">
-        <button title="Toggle sidebar" onClick={() => setShowSide(!showSide)}>☰</button>
-        {layout === "vault" && (
+    <div class={"app " + (layout === "doc" ? "web" : "obs")}>
+      <header class="topbar">
+        {layout === "doc" && (
+          <button class="tb-btn" title="Show or hide the navigation menu" onClick={() => setShowSide(!showSide)}>☰ Menu</button>
+        )}
+        <span class="brand" title="Home" onClick={() => location.assign("#/")}>ObsidianWeb</span>
+        <Search provider={boot.provider} notes={files} onOpen={go} />
+        {layout === "doc" && (
           <>
-            <button title="File tree" class={sideView === "tree" ? "on" : ""} onClick={() => (setSideView("tree"), store.set("sideView", "tree"))}>🗂</button>
-            <button title="Navbar (flat list + search)" class={sideView === "nav" ? "on" : ""} onClick={() => (setSideView("nav"), store.set("sideView", "nav"))}>🔎</button>
+            <button class="tb-btn" title="Show or hide the 'On this page' and History panel" onClick={() => setShowRight(!showRight)}>On this page</button>
+            <button class="tb-btn" title="Theme, colors and default view" onClick={() => setShowSettings(true)}>⚙ Settings</button>
           </>
         )}
-        <button title={layout === "doc" ? "Switch to Obsidian mode (tabs, split, editor)" : "Switch to Doc Site mode"} onClick={() => setLayoutPersist(layout === "doc" ? "vault" : "doc")}>
-          {layout === "doc" ? "📖" : "🗃"}
-        </button>
+        <div class="seg" role="group" aria-label="View mode">
+          <button class={layout === "doc" ? "on" : ""} title="Web mode: a wiki-style site, one page at a time" onClick={() => setLayoutPersist("doc")}>Web</button>
+          <button class={layout === "vault" ? "on" : ""} title="Obsidian mode: tabs, split view and editor" onClick={() => setLayoutPersist("vault")}>Obsidian</button>
+        </div>
+      </header>
+    <div class={"shell " + (layout === "doc" ? "doc-mode" : "vault-mode")}>
+      {layout === "vault" && <div class="ribbon">
+        <RibbonBtn icon="☰" label="Sidebar" tip="Show or hide the left sidebar" onClick={() => setShowSide(!showSide)} />
+        {layout === "vault" && (
+          <>
+            <RibbonBtn icon="🗂" label="Files" tip="File tree view of the vault folders" on={sideView === "tree"} onClick={() => (setSideView("tree"), store.set("sideView", "tree"))} />
+            <RibbonBtn icon="🔎" label="List" tip="Flat list of all notes, filterable" on={sideView === "nav"} onClick={() => (setSideView("nav"), store.set("sideView", "nav"))} />
+          </>
+        )}
         <span class="grow" />
-        <button title="Toggle right panel" onClick={() => setShowRight(!showRight)}>▤</button>
-      </div>
+        <RibbonBtn icon="▤" label="Panel" tip="Show or hide the right panel (outline and history)" onClick={() => setShowRight(!showRight)} />
+        <RibbonBtn icon="⚙" label="Settings" tip="Theme, colors and default view" on={showSettings} onClick={() => setShowSettings(true)} />
+      </div>}
+
+      {showSettings && (
+        <div class="overlay" onClick={() => setShowSettings(false)}>
+          <div class="modal" onClick={(e) => e.stopPropagation()}>
+            <div class="modal-head">
+              <b>Settings</b>
+              <span class="grow" />
+              <button title="Close settings" onClick={() => setShowSettings(false)}>Close</button>
+            </div>
+            <label title="Color scheme for the whole site">
+              Theme
+              <select value={theme} onChange={(e) => setTheme((e.target as HTMLSelectElement).value)}>
+                <option value="system">System (follow OS)</option>
+                <option value="dark">Dark</option>
+                <option value="light">Light</option>
+                <option value="nord">Nord</option>
+                <option value="solarized">Solarized Dark</option>
+                <option value="sepia">Sepia</option>
+              </select>
+            </label>
+            <label title="Highlight color for links, tags and the active page">
+              Accent color
+              <span>
+                <input type="color" value={accent || "#a78bfa"} onInput={(e) => setAccent((e.target as HTMLInputElement).value)} />
+                {accent && <button title="Use the theme's accent color" onClick={() => setAccent("")}>Reset</button>}
+              </span>
+            </label>
+            <label title="Which layout opens by default on this device">
+              Default view
+              <select value={layout} onChange={(e) => setLayoutPersist((e.target as HTMLSelectElement).value as "doc" | "vault")}>
+                <option value="doc">Web mode (Doc Site)</option>
+                <option value="vault">Obsidian mode</option>
+              </select>
+            </label>
+            <div class="muted small">
+              Vault attachment folder (from .obsidian/app.json): <code>{boot.cfg.obsidian?.attachmentFolderPath ?? "not set"}</code>
+            </div>
+            <div class="muted small">Settings are saved in this browser only.</div>
+          </div>
+        </div>
+      )}
 
       {showSide && (
         <aside class="side">
@@ -207,7 +288,7 @@ export function App() {
             <div class={"tab" + (t === current ? " active" : "")} onClick={() => go(t)}>
               {title(t)}
               <span class="x" title="Open in split pane" onClick={(e) => (e.stopPropagation(), setSplit(t))}>⧉</span>
-              <span class="x" onClick={(e) => (e.stopPropagation(), closeTab(t))}>×</span>
+              <span class="x" title="Close tab" onClick={(e) => (e.stopPropagation(), closeTab(t))}>×</span>
             </div>
           ))}
         </div>}
@@ -219,9 +300,9 @@ export function App() {
               <span class="grow" />
               {status && <span class="status">{status}</span>}
               {mode === "edit" && boot.provider.canWrite && (
-                <button disabled={!dirty} onClick={save}>Save</button>
+                <button disabled={!dirty} title="Save and commit this note (Ctrl/Cmd+S)" onClick={save}>Save</button>
               )}
-              <button class={mode === "raw" ? "on" : ""} onClick={() => (setStatus(""), setMode(mode === "raw" ? "preview" : "raw"))}>
+              <button class={mode === "raw" ? "on" : ""} title="Toggle between the rendered page and the raw markdown source" onClick={() => (setStatus(""), setMode(mode === "raw" ? "preview" : "raw"))}>
                 {mode === "raw" ? "Rendered" : "Show raw"}
               </button>
               {layout === "vault" && (
@@ -231,6 +312,7 @@ export function App() {
               )}
               {layout === "vault" && (
                 <button
+                  title="Edit this note in a markdown editor with live preview"
                   onClick={() => {
                     setSelected(null);
                     setMode(mode === "edit" ? "preview" : "edit");
@@ -320,6 +402,7 @@ export function App() {
           </div>
         </aside>
       )}
+    </div>
     </div>
   );
 }

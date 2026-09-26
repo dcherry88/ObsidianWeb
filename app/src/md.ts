@@ -36,9 +36,40 @@ export function resolveLink(files: string[], target: string): string | undefined
     .sort((a, b) => a.length - b.length)[0];
 }
 
+export interface RenderCtx {
+  all: string[]; // every vault file (notes + attachments)
+  current: string; // path of the note being rendered
+  attachmentFolder?: string; // .obsidian/app.json attachmentFolderPath
+  assetUrl: (path: string) => string;
+}
+
+const IMG = /\.(png|jpe?g|gif|webp|svg|avif|bmp)$/i;
+const dirOf = (p: string) => (p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : "");
+const join = (...parts: string[]) => parts.filter(Boolean).join("/").replace(/\/\.\//g, "/").replace(/^\.\//, "");
+
+/** Find an attachment the way Obsidian would: exact, next to the note, in the configured attachment folder, then by name. */
+export function resolveAsset(ctx: RenderCtx, target: string): string | undefined {
+  let t: string;
+  try {
+    t = decodeURIComponent(target.split("|")[0].split("#")[0].trim());
+  } catch {
+    t = target;
+  }
+  if (!t || /^(https?:|data:|mailto:)/i.test(t)) return undefined;
+  const dir = dirOf(ctx.current);
+  const af = ctx.attachmentFolder;
+  const cands = [t.replace(/^\//, ""), join(dir, t)];
+  if (af === "./" || af === ".") cands.push(join(dir, t));
+  else if (af?.startsWith("./")) cands.push(join(dir, af.slice(2), t));
+  else if (af && af !== "/") cands.push(join(af, t));
+  for (const c of cands) if (ctx.all.includes(c)) return c;
+  const base = t.split("/").pop()!.toLowerCase();
+  return ctx.all.filter((f) => f.split("/").pop()!.toLowerCase() === base).sort((a, b) => a.length - b.length)[0];
+}
+
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 
-export function renderMarkdown(src: string, files: string[]): string {
+export function renderMarkdown(src: string, files: string[], ctx?: RenderCtx): string {
   const md = new MarkdownIt({
     linkify: true,
     highlight: (code, lang) => {
@@ -71,6 +102,43 @@ export function renderMarkdown(src: string, files: string[]): string {
     return hit
       ? `<a class="wikilink" href="#/${hit.split("/").map(encodeURIComponent).join("/")}">${esc(alias)}</a>`
       : `<span class="wikilink unresolved" title="Not found">${esc(alias)}</span>`;
+  };
+
+  // ![[embed]] : images render inline; other files become links
+  md.inline.ruler.before("image", "embed", (state, silent) => {
+    const { src, pos } = state;
+    if (src.charCodeAt(pos) !== 0x21 || !src.startsWith("[[", pos + 1)) return false;
+    const end = src.indexOf("]]", pos + 3);
+    if (end < 0) return false;
+    if (!silent) {
+      const [target, size] = src.slice(pos + 3, end).split("|");
+      const tok = state.push("embed", "", 0);
+      tok.meta = { target: target.trim(), size: (size ?? "").trim() };
+    }
+    state.pos = end + 2;
+    return true;
+  });
+  md.renderer.rules.embed = (tokens, i) => {
+    const { target, size } = tokens[i].meta;
+    if (IMG.test(target)) {
+      const hit = ctx && resolveAsset(ctx, target);
+      if (!hit) return `<span class="wikilink unresolved" title="Image not found">${esc(target)}</span>`;
+      const w = /^\d+$/.test(size) ? ` width="${size}"` : "";
+      return `<img src="${esc(ctx!.assetUrl(hit))}" alt="${esc(target)}"${w}>`;
+    }
+    const note = resolveLink(files, target);
+    if (note) return `<a class="wikilink" href="#/${note.split("/").map(encodeURIComponent).join("/")}">${esc(target)}</a>`;
+    const asset = ctx && resolveAsset(ctx, target);
+    return asset ? `<a href="${esc(ctx!.assetUrl(asset))}" target="_blank" rel="noopener">${esc(target)}</a>` : `<span class="wikilink unresolved">${esc(target)}</span>`;
+  };
+
+  // standard ![alt](path) images: resolve relative paths against the vault
+  const defaultImage = md.renderer.rules.image!;
+  md.renderer.rules.image = (tokens, i, opts, env, self) => {
+    const src = tokens[i].attrGet("src") ?? "";
+    const hit = ctx && resolveAsset(ctx, src);
+    if (hit) tokens[i].attrSet("src", ctx!.assetUrl(hit));
+    return defaultImage(tokens, i, opts, env, self);
   };
 
   // heading ids for outline navigation

@@ -30,7 +30,7 @@ async function tree(): Promise<string[]> {
   const { stdout } = await git("ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", ".");
   return stdout
     .split("\0")
-    .filter((f) => f.endsWith(".md") && !f.startsWith(".obsidian/"))
+    .filter((f) => f && !f.startsWith(".obsidian/"))
     .sort((a, b) => a.localeCompare(b));
 }
 
@@ -48,7 +48,44 @@ async function history(file: string): Promise<Commit[]> {
 
 const app = new Hono();
 
-app.get("/config.json", (c) => c.json({ mode: "server", canWrite: ALLOW_WRITE, defaultLayout: process.env.DEFAULT_LAYOUT === "vault" ? "vault" : "doc" } satisfies AppConfig));
+async function obsidianSettings(): Promise<AppConfig["obsidian"]> {
+  try {
+    const j = JSON.parse(await readFile(path.join(VAULT, ".obsidian/app.json"), "utf8"));
+    return { attachmentFolderPath: j.attachmentFolderPath };
+  } catch {
+    return {};
+  }
+}
+
+app.get("/config.json", async (c) =>
+  c.json({
+    mode: "server",
+    canWrite: ALLOW_WRITE,
+    defaultLayout: process.env.DEFAULT_LAYOUT === "vault" ? "vault" : "doc",
+    obsidian: await obsidianSettings(),
+  } satisfies AppConfig),
+);
+
+const MIME: Record<string, string> = {
+  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp",
+  svg: "image/svg+xml", pdf: "application/pdf", mp3: "audio/mpeg", mp4: "video/mp4", webm: "video/webm",
+};
+
+// Attachments (images etc.). SVG is served as an attachment-safe type via CSP sandbox.
+app.get("/api/raw", async (c) => {
+  try {
+    const p = c.req.query("path") ?? "";
+    const buf = await readFile(safe(p));
+    const ext = p.split(".").pop()!.toLowerCase();
+    return c.body(buf, 200, {
+      "content-type": MIME[ext] ?? "application/octet-stream",
+      "content-security-policy": "sandbox",
+      "x-content-type-options": "nosniff",
+    });
+  } catch {
+    return c.text("not found", 404);
+  }
+});
 
 app.get("/api/tree", async (c) => c.json(await tree()));
 

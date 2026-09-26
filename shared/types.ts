@@ -10,6 +10,8 @@ export interface AppConfig {
   canWrite: boolean;
   /** initial layout when the user has no saved preference */
   defaultLayout?: "doc" | "vault";
+  /** subset of the vault's .obsidian/app.json that affects rendering */
+  obsidian?: { attachmentFolderPath?: string };
   /** static mode only: GitHub repo used for history, e.g. "owner/repo" */
   repo?: string;
   branch?: string;
@@ -20,9 +22,11 @@ export interface AppConfig {
 /** Everything the UI needs from a vault. Implemented by the server API and the static/GitHub provider. */
 export interface VaultProvider {
   canWrite: boolean;
-  /** vault-relative paths of markdown files */
+  /** vault-relative paths of all files (notes and attachments; .obsidian excluded) */
   tree(): Promise<string[]>;
   read(path: string, ref?: string): Promise<string>;
   history(path: string): Promise<Commit[]>;
   write(path: string, content: string, message?: string): Promise<void>;
+  /** URL for a non-markdown vault file (images, PDFs...) */
+  assetUrl(path: string): string;
 }

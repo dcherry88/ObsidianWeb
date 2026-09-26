@@ -24,3 +24,8 @@ Repo Settings → Pages → Source: **GitHub Actions**. Every push to `main` reb
 
 ## Layout
 `vault/` notes · `app/` Vite + Preact UI · `server/` Hono API · `shared/` provider types
+
+## License
+[MIT](LICENSE) © 2026 Danny Cherry. Fork and modify freely. Third-party dependencies keep their own licenses (MIT, BSD, Apache-2.0, MPL-2.0).
+
+The sample notes in `vault/` are test content and are covered by the same license.

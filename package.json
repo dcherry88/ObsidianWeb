@@ -1,8 +1,12 @@
 {
   "name": "obsidian-web",
   "private": true,
+  "license": "MIT",
   "type": "module",
-  "workspaces": ["app", "server"],
+  "workspaces": [
+    "app",
+    "server"
+  ],
   "scripts": {
     "dev:app": "npm run dev -w app",
     "dev:server": "ALLOW_WRITE=1 npm run dev -w server",

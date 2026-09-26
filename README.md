@@ -221,7 +221,41 @@ How it works: on start and then every `FNS_SYNC_INTERVAL` seconds (default 60; `
 > Built from FNS's published REST documentation and tested against a mock of that API (`scripts/mock-fns.mjs`: full sync, incremental update, client/scope errors, outage handling, history) and against a real FNS instance (initial sync of notes and attachments). Per-note history and change-detection on later syncs have only been exercised against the mock so far. If a sync fails, check `/api/sync/status` and the container log; the error text includes FNS's own code (307 not logged in, 314/315 client or scope restricted).
 
 ### Deploying with Komodo
-`komodo.compose.yml` runs ObsidianWeb alone, against an FNS service you already have, with OIDC required (the container refuses to start without the settings). Create a Komodo stack that clones this repo (`file_paths: komodo.compose.yml`, build enabled) and fill in the environment: `FNS_URL`, `FNS_TOKEN`, `FNS_VAULT`, `PUBLIC_URL`, `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OBSIDIANWEB_IP` (and optionally `ATTACHMENT_FOLDER`, `FNS_SYNC_INTERVAL`, `DEFAULT_LAYOUT`). Its network settings assume an external ipvlan named `vlan103_ipvlan`; edit the file for your own network.
+`komodo.compose.yml` runs ObsidianWeb by itself, using a Fast Note Sync service you already have, and it **requires** OIDC sign-in (the container refuses to start if the settings are missing, so a blank issuer can never leave a vault open).
+
+**Create the stack**
+1. In Komodo, create a stack on the server you want. Source: **Git repo** `dcherry88/ObsidianWeb` (or your fork), branch `main`, compose file path `komodo.compose.yml`.
+2. Turn on **Run build** (the image is built from this repo on the host) and leave **Auto pull** off (there is no registry image to pull).
+3. Fill in the stack's **Environment** (Komodo writes it to `.env`, which the compose file reads):
+
+| Variable | Meaning |
+|---|---|
+| `FNS_URL` | Address of your FNS service reachable from the container, for example `http://10.0.0.22:9000`. The internal address is preferable to a public one |
+| `FNS_TOKEN` | FNS token (see [Vault from Fast Note Sync](#vault-from-fast-note-sync) for the settings to give it) |
+| `FNS_VAULT` | Vault name exactly as FNS shows it |
+| `FNS_CLIENT` | Optional, default `ObsidianWeb`. Must match the token's Client restriction |
+| `FNS_SYNC_INTERVAL` | Optional, seconds between syncs (default 60) |
+| `ATTACHMENT_FOLDER` | Your vault's attachment folder (FNS doesn't sync `.obsidian` settings) |
+| `PUBLIC_URL` | The **https** address people open, for example `https://notes.example.com` |
+| `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | From your identity provider client (callback `PUBLIC_URL` + `/auth/callback`) |
+| `OBSIDIANWEB_IP` | A free address on the compose file's network (see below) |
+| `DEFAULT_LAYOUT` | Optional: `doc` (Web) or `vault` (Obsidian) for first-time visitors |
+
+Komodo variables work too: put the client ID or secret in Komodo Variables and reference them as `[[VARIABLE_NAME]]` in the Environment.
+
+4. **Deploy.** Check the container log for `Source: fast-note-sync ...` and `Auth: OIDC (...)`, and open `/healthz` (returns `ok`). The first sync line (`[fns] sync: N change(s), ...`) confirms the connection to FNS.
+
+**Network.** The compose file joins an external network named `vlan103_ipvlan` and gives the container a fixed IP (`OBSIDIANWEB_IP`), so nothing needs a published port and the container answers on its own address at port 8787 (plain HTTP). Edit the `networks:` section for your own setup, for example to use a normal bridge network with `ports: ["8787:8787"]`.
+
+**Public access.** Put a TLS terminator in front, such as a Cloudflare tunnel or reverse proxy, pointing at `http://<OBSIDIANWEB_IP>:8787`. `PUBLIC_URL` must be that public `https://` address, and the same URL plus `/auth/callback` must be registered with your identity provider. Session cookies are marked `Secure`, so sign-in only sticks over HTTPS; the plain internal address is only good for `/healthz` checks.
+
+**Data.** The synced copy of the vault lives in `/opt/docker/appdata/obsidianweb/data` (mounted at `/data`). It is safe to delete: the next sync rebuilds it.
+
+**Updating.** Push to `main`, then **Deploy** the stack again. Komodo pulls the repo and rebuilds the image.
+
+**Notes.**
+- Don't edit the stack's Environment through an API or MCP tool that returns masked secrets: writing the text back would replace your real token and secret with the masked placeholders. Use the Komodo UI.
+- With `docker compose` directly: `docker compose -f komodo.compose.yml --env-file .env up -d --build`.
 
 ---
 
@@ -231,6 +265,7 @@ How it works: on start and then every `FNS_SYNC_INTERVAL` seconds (default 60; `
 - **Show raw**: toolbar button, shows the markdown source (including frontmatter).
 - **History**: right panel. Click a commit to view that version and see a diff against the current one.
 - **Navigation (Web mode)**: compact folder menu; opening a page expands only the folders that hold it and collapses the rest, and you can open or close any section by clicking its heading until the next page change.
+- **Phones (under 800px wide)**: always the Web layout, with a bottom bar (Pages, Search, Home, Contents, More), a slide-out page menu, and a bottom sheet for outline, backlinks, tags and history. Sync now, Settings and Sign out are under **More**.
 - **Split** (Obsidian mode): open a second note beside the current one, or use the ⧉ icon on a tab.
 - **Edit** (Obsidian mode, server with `ALLOW_WRITE=1`): editor with live preview; `Ctrl/Cmd+S` saves and commits. In static mode the editor is view-only and nothing is saved.
 - **Settings** (⚙): theme, accent color, default view. Stored in the browser only.
@@ -239,7 +274,11 @@ How it works: on start and then every `FNS_SYNC_INTERVAL` seconds (default 60; `
 | Symptom | Likely cause |
 |---|---|
 | Pages site is a 404 | Pages source is not **GitHub Actions**, or the first run predates that setting. Change it and re-run the workflow. |
-| Old version still showing after a deploy | Browser cache; hard refresh. |
+| Old version still showing after a deploy | Browser cache (GitHub Pages caches for 10 minutes); hard refresh or use a private window. |
+| Pages site shows the README instead of the app, and `config.json` on the site is a 404 | The Pages source is **Deploy from a branch**, so GitHub's built-in Jekyll job (`pages build and deployment`) races the workflow. Set Settings → Pages → Source to **GitHub Actions**, then re-run **Deploy to Pages** (not the Jekyll job) |
+| FNS sync error `code 307` | Token not accepted: wrong token or header (the server sends `Authorization: Bearer`). Make a new token in the FNS admin panel |
+| FNS sync error `code 314` or `315` | The token's Client, protocol, function or vault restriction doesn't allow the request. Client restriction must equal `FNS_CLIENT` (default `ObsidianWeb`) or `*`; allow REST, note and attachment read, and the vault. FNS returns these in an HTTP 200 body |
+| Sign-in loop or `Sign-in expired` | `PUBLIC_URL` doesn't match the address you use (scheme, host or port), or you opened the plain `http://` address so the Secure cookie was dropped |
 | History panel empty or errors on Pages | GitHub API rate limit (60/hr anonymous) or a private repo. |
 | Images missing | Attachment isn't in the folder set by `attachmentFolderPath`, or filename case differs (Pages is case-sensitive). |
 | `git` errors in Docker | Vault isn't a git repo, or the mount path is wrong. |
@@ -260,9 +299,10 @@ Ideas to revisit, not commitments.
   - Sync changes back to FNS, as long as the token's permissions allow it (the token would need write access to notes and attachments).
 
 ### Both modes
-- **Mobile-friendly view.** First version done: phones (under 800px) get the Web layout with a slide-out page menu, a bottom sheet for outline, backlinks, tags and history, a compact top bar with search and a ⋯ menu, larger touch targets, and grids and tables that stack or scroll. Ideas still open:
-  - A bottom navigation bar, and swipe gestures to open and close the drawers.
+- **Mobile-friendly view.** First version done: phones (under 800px) get the Web layout with a bottom navigation bar, a slide-out page menu, a bottom sheet for outline, backlinks, tags and history, larger touch targets, and grids and tables that stack or scroll. Ideas still open:
+  - Swipe gestures to open and close the drawers.
   - A tablet layout between phone and desktop.
+  - An option to use the Obsidian layout on a phone (today phones always get the Web layout).
   - Installable web app (home-screen icon, offline reading).
   - PDFs on iOS only show the first page inside a frame, so open them in a new tab or a dedicated viewer.
   - Editing on a phone, once hosted-site editing exists.

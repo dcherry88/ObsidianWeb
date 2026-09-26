@@ -1,5 +1,7 @@
 # Obsidian Web UI: Build Plan
 
+> **Status:** this is the original planning document. The project has moved on: see [README.md](README.md) for what exists today (server mode with OIDC, Fast Note Sync source, PDF and image support, backlinks and tags, mobile layout, Docker/Komodo deployment) and its **Roadmap** section for what's next. Kept for the reasoning behind the early decisions.
+
 ## Goal
 A static, read-first web viewer/editor for an Obsidian vault stored in a public Git repo, deployable on GitHub Pages, with an Obsidian-like layout and git-backed version history.
 

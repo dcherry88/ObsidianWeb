@@ -25,6 +25,8 @@ export function Search({
   noteTags,
   allTags,
   onOpen,
+  autoFocus,
+  onClose,
 }: {
   notes: string[];
   /** number of notes whose text will be indexed (PDFs are searchable by name only) */
@@ -33,12 +35,18 @@ export function Search({
   noteTags: Map<string, string[]>;
   allTags: [string, string[]][];
   onOpen: (p: string) => void;
+  autoFocus?: boolean;
+  onClose?: () => void;
 }) {
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
   const [sel, setSel] = useState(0);
   const ready = texts.size;
   const input = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (autoFocus) input.current?.focus();
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -96,6 +104,7 @@ export function Search({
 
   const pick = (p: string) => {
     onOpen(p);
+    onClose?.();
     setOpen(false);
     setQ("");
     input.current?.blur();
@@ -117,7 +126,7 @@ export function Search({
           else if (e.key === "ArrowUp") (e.preventDefault(), setSel(Math.max(sel - 1, 0)));
           else if (e.key === "Enter" && shown[sel]) pick(shown[sel].path);
           else if (e.key === "Tab" && suggestions[0] && partial) (e.preventDefault(), applyTag(suggestions[0][0]));
-          else if (e.key === "Escape") (setOpen(false), input.current?.blur());
+          else if (e.key === "Escape") (setOpen(false), input.current?.blur(), onClose?.());
         }}
       />
       {open && active && (

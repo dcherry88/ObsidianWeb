@@ -6,6 +6,7 @@ import { outline, renderMarkdown, slug, splitFrontmatter, type RenderCtx } from 
 import { Editor } from "./Editor";
 import { NavMenu, Tree } from "./Tree";
 import { Search } from "./Search";
+import { Icon } from "./Icon";
 import { useNoteIndex, useNoteTexts, frontmatterTags, inlineTags } from "./notes";
 
 const store = {
@@ -37,7 +38,7 @@ const title = (p: string) => p.split("/").pop()!.replace(/\.md$/, "");
 function RibbonBtn(p: { icon: string; label: string; tip: string; on?: boolean; onClick: () => void }) {
   return (
     <button class={"rbtn" + (p.on ? " on" : "")} title={p.tip} aria-label={p.tip} onClick={p.onClick}>
-      <span class="ico">{p.icon}</span>
+      <span class="ico"><Icon name={p.icon} size={20} /></span>
       <span class="lbl">{p.label}</span>
     </button>
   );
@@ -76,6 +77,7 @@ export function App() {
   const mobile = useMobile();
   const layout = mobile ? "doc" : layoutPref;
   const [moreOpen, setMoreOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   // Web-mode nav: only the folders holding the current page are open; clicking a heading opens/closes it until the next page change
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState("");
@@ -137,6 +139,7 @@ export function App() {
     setShowSide(!mobile);
     setShowRight(!mobile);
     setMoreOpen(false);
+    setSearchOpen(false);
   }, [mobile]);
   // opening a page closes the drawers
   useEffect(() => {
@@ -217,6 +220,7 @@ export function App() {
   const heads = useMemo(() => outline(splitFrontmatter(text).body), [text]);
   const fm = splitFrontmatter(text).fm;
 
+  const homePath = useMemo(() => ["index.md", "README.md", "Home.md", "Welcome.md"].find((h) => files.includes(h)) ?? files[0] ?? "", [files]);
   const go = (p: string) => (location.hash = "#/" + p.split("/").map(encodeURIComponent).join("/"));
   const toggle = (p: string) =>
     setOpen((o) => {
@@ -275,62 +279,47 @@ export function App() {
 
   return (
     <div class={"app " + (layout === "doc" ? "web" : "obs") + (mobile ? " mobile" : "")}>
-      <header class="topbar">
-        {layout === "doc" && (
-          <button class="tb-btn menu-btn" title="Show or hide the navigation menu" aria-label="Navigation menu" onClick={() => (setShowSide(!showSide), setShowRight(false), setMoreOpen(false))}>{mobile ? "☰" : "☰ Menu"}</button>
-        )}
-        <span class="brand" title="Home" onClick={() => location.assign("#/")}>ObsidianWeb</span>
-        {!mobile && (
+      {!mobile && (
+        <header class="topbar">
+          {layout === "doc" && (
+            <button class="tb-btn menu-btn" title="Show or hide the navigation menu" aria-label="Navigation menu" onClick={() => setShowSide(!showSide)}><Icon name="menu" /> Menu</button>
+          )}
+          <span class="brand" title="Home" onClick={() => location.assign("#/")}>ObsidianWeb</span>
           <div class="seg" role="group" aria-label="View mode">
             <button class={layout === "doc" ? "on" : ""} title="Web mode: a wiki-style site, one page at a time" onClick={() => setLayoutPersist("doc")}>Web</button>
             <button class={layout === "vault" ? "on" : ""} title="Obsidian mode: tabs, split view and editor" onClick={() => setLayoutPersist("vault")}>Obsidian</button>
           </div>
-        )}
-        <Search notes={navFiles} indexTotal={files.length} texts={texts} noteTags={index.noteTags} allTags={allTags} onOpen={go} />
-        <span class="grow" />
-        {syncMsg && <span class="sync-msg">{syncMsg}</span>}
-        {mobile ? (
-          <div class="more">
-            <button class="tb-btn" title="More: page outline, sync, settings" aria-label="More" onClick={() => setMoreOpen(!moreOpen)}>⋯</button>
-            {moreOpen && (
-              <div class="more-menu" onClick={() => setMoreOpen(false)}>
-                <button onClick={() => (setShowRight(true), setShowSide(false))}>On this page</button>
-                {boot.cfg.canSync && (
-                  <button disabled={syncing} onClick={forceSync}>{syncing ? "Syncing…" : "↻ Sync now"}</button>
-                )}
-                <button onClick={() => setShowSettings(true)}>⚙ Settings</button>
-              </div>
-            )}
-          </div>
-        ) : (
-          <>
-            {boot.cfg.canSync && (
-              <button class="tb-btn" disabled={syncing} title="Pull the latest changes from Fast Note Sync now (it also syncs automatically every minute)" onClick={forceSync}>
-                {syncing ? "Syncing…" : "↻ Sync now"}
-              </button>
-            )}
-            {layout === "doc" && (
-              <>
-                <button class="tb-btn" title="Show or hide the 'On this page' and History panel" onClick={() => setShowRight(!showRight)}>On this page</button>
-                <button class="tb-btn" title="Theme, colors and default view" onClick={() => setShowSettings(true)}>⚙ Settings</button>
-              </>
-            )}
-          </>
-        )}
-      </header>
-      {mobile && (showSide || showRight) && <div class="backdrop" onClick={() => (setShowSide(false), setShowRight(false))} />}
+          <Search notes={navFiles} indexTotal={files.length} texts={texts} noteTags={index.noteTags} allTags={allTags} onOpen={go} />
+          <span class="grow" />
+          {syncMsg && <span class="sync-msg">{syncMsg}</span>}
+          {boot.cfg.canSync && (
+            <button class="tb-btn" disabled={syncing} title="Pull the latest changes from Fast Note Sync now (it also syncs automatically every minute)" onClick={forceSync}>
+              <Icon name="sync" spin={syncing} /> {syncing ? "Syncing…" : "Sync now"}
+            </button>
+          )}
+          {layout === "doc" && (
+            <>
+              <button class="tb-btn" title="Show or hide the 'On this page' and History panel" onClick={() => setShowRight(!showRight)}>On this page</button>
+              <button class="tb-btn" title="Theme, colors and default view" onClick={() => setShowSettings(true)}><Icon name="settings" /> Settings</button>
+            </>
+          )}
+        </header>
+      )}
+      {mobile && (showSide || showRight || searchOpen || moreOpen) && (
+        <div class="backdrop" onClick={() => (setShowSide(false), setShowRight(false), setSearchOpen(false), setMoreOpen(false))} />
+      )}
     <div class={"shell " + (layout === "doc" ? "doc-mode" : "vault-mode")}>
       {layout === "vault" && <div class="ribbon">
-        <RibbonBtn icon="☰" label="Sidebar" tip="Show or hide the left sidebar" onClick={() => setShowSide(!showSide)} />
+        <RibbonBtn icon="menu" label="Sidebar" tip="Show or hide the left sidebar" onClick={() => setShowSide(!showSide)} />
         {layout === "vault" && (
           <>
-            <RibbonBtn icon="🗂" label="Files" tip="File tree view of the vault folders" on={sideView === "tree"} onClick={() => (setSideView("tree"), store.set("sideView", "tree"))} />
-            <RibbonBtn icon="🔎" label="List" tip="Flat list of all notes, filterable" on={sideView === "nav"} onClick={() => (setSideView("nav"), store.set("sideView", "nav"))} />
+            <RibbonBtn icon="folder" label="Files" tip="File tree view of the vault folders" on={sideView === "tree"} onClick={() => (setSideView("tree"), store.set("sideView", "tree"))} />
+            <RibbonBtn icon="list" label="List" tip="Flat list of all notes, filterable" on={sideView === "nav"} onClick={() => (setSideView("nav"), store.set("sideView", "nav"))} />
           </>
         )}
         <span class="grow" />
-        <RibbonBtn icon="▤" label="Panel" tip="Show or hide the right panel (outline and history)" onClick={() => setShowRight(!showRight)} />
-        <RibbonBtn icon="⚙" label="Settings" tip="Theme, colors and default view" on={showSettings} onClick={() => setShowSettings(true)} />
+        <RibbonBtn icon="panel" label="Panel" tip="Show or hide the right panel (outline and history)" onClick={() => setShowRight(!showRight)} />
+        <RibbonBtn icon="settings" label="Settings" tip="Theme, colors and default view" on={showSettings} onClick={() => setShowSettings(true)} />
       </div>}
 
       {showSettings && (
@@ -382,7 +371,7 @@ export function App() {
 
       {showSide && (
         <aside class="side">
-          {mobile && <div class="drawer-head"><b>Pages</b><button title="Close" onClick={() => setShowSide(false)}>✕</button></div>}
+          {mobile && <div class="drawer-head"><b>Pages</b><button title="Close" aria-label="Close" onClick={() => setShowSide(false)}><Icon name="close" /></button></div>}
           {layout === "doc" && <div class="site-title">Docs</div>}
           {layout === "vault" && sideView === "nav" && (
             <input class="search" placeholder="Search files…" value={search} onInput={(e) => setSearch((e.target as HTMLInputElement).value)} />
@@ -409,7 +398,7 @@ export function App() {
           {tabs.map((t) => (
             <div class={"tab" + (t === current ? " active" : "")} onClick={() => go(t)}>
               {title(t)}
-              <span class="x" title="Open in split pane" onClick={(e) => (e.stopPropagation(), setSplit(t))}>⧉</span>
+              <span class="x" title="Open in split pane" onClick={(e) => (e.stopPropagation(), setSplit(t))}><Icon name="split" size={14} /></span>
               <span class="x" title="Close tab" onClick={(e) => (e.stopPropagation(), closeTab(t))}>×</span>
             </div>
           ))}
@@ -502,7 +491,7 @@ export function App() {
 
       {showRight && (
         <aside class="right">
-          {mobile && <div class="drawer-head"><b>This page</b><button title="Close" onClick={() => setShowRight(false)}>✕</button></div>}
+          {mobile && <div class="drawer-head"><b>This page</b><button title="Close" aria-label="Close" onClick={() => setShowRight(false)}><Icon name="close" /></button></div>}
           <div class="tabs small">
             <div class={"tab" + (rightTab === "outline" ? " active" : "")} onClick={() => setRightTab("outline")}>{layout === "doc" ? "On this page" : "Outline"}</div>
             <div class={"tab" + (rightTab === "backlinks" ? " active" : "")} title="Notes that link to this one" onClick={() => setRightTab("backlinks")}>Backlinks{myBacklinks.length ? ` (${myBacklinks.length})` : ""}</div>
@@ -568,6 +557,39 @@ export function App() {
         </aside>
       )}
     </div>
+    {mobile && searchOpen && (
+      <div class="search-sheet">
+        <Search notes={navFiles} indexTotal={files.length} texts={texts} noteTags={index.noteTags} allTags={allTags} onOpen={go} autoFocus onClose={() => setSearchOpen(false)} />
+        <button class="tb-btn" onClick={() => setSearchOpen(false)}>Cancel</button>
+      </div>
+    )}
+    {mobile && moreOpen && (
+      <div class="more-menu" onClick={() => setMoreOpen(false)}>
+        {boot.cfg.canSync && <button disabled={syncing} onClick={forceSync}><Icon name="sync" spin={syncing} /> {syncing ? "Syncing…" : "Sync now"}</button>}
+        <button onClick={() => setShowSettings(true)}><Icon name="settings" /> Settings</button>
+        {boot.cfg.signOutUrl && <a class="menu-link" href={boot.cfg.signOutUrl}>Sign out</a>}
+      </div>
+    )}
+    {mobile && syncMsg && <div class="toast">{syncMsg}</div>}
+    {mobile && (
+      <nav class="bottombar" aria-label="Main navigation">
+        <button class={showSide ? "on" : ""} aria-label="Pages" onClick={() => (setShowSide(!showSide), setShowRight(false), setSearchOpen(false), setMoreOpen(false))}>
+          <span class="ico"><Icon name="folder" size={22} /></span><span class="lbl">Pages</span>
+        </button>
+        <button class={searchOpen ? "on" : ""} aria-label="Search" onClick={() => (setSearchOpen(true), setShowSide(false), setShowRight(false), setMoreOpen(false))}>
+          <span class="ico"><Icon name="search" size={22} /></span><span class="lbl">Search</span>
+        </button>
+        <button aria-label="Home" onClick={() => (setShowSide(false), setShowRight(false), setSearchOpen(false), setMoreOpen(false), homePath && go(homePath))}>
+          <span class="ico"><Icon name="home" size={22} /></span><span class="lbl">Home</span>
+        </button>
+        <button class={showRight ? "on" : ""} aria-label="On this page" onClick={() => (setShowRight(!showRight), setShowSide(false), setSearchOpen(false), setMoreOpen(false))}>
+          <span class="ico"><Icon name="contents" size={22} /></span><span class="lbl">Contents</span>
+        </button>
+        <button class={moreOpen ? "on" : ""} aria-label="More" onClick={() => (setMoreOpen(!moreOpen), setShowSide(false), setShowRight(false), setSearchOpen(false))}>
+          <span class="ico"><Icon name="more" size={22} /></span><span class="lbl">More</span>
+        </button>
+      </nav>
+    )}
     </div>
   );
 }

@@ -291,3 +291,41 @@ pre.fm { font-size: 12px; color: var(--muted); border: 1px solid var(--border); 
   .md .vsections table { table-layout: fixed; }
   .md .vsections tbody td:first-child { width: 34%; }
 }
+
+/* ===== Mobile bottom navigation (replaces the top bar on phones) ===== */
+.bottombar, .search-sheet, .toast { display: none; }
+@media (max-width: 800px) {
+  :root { --bar-h: 58px; }
+  .bottombar { display: flex; flex: none; justify-content: space-around; align-items: stretch; height: calc(var(--bar-h) + env(safe-area-inset-bottom)); padding-bottom: env(safe-area-inset-bottom); background: var(--bg2); border-top: 1px solid var(--border); z-index: 50; position: relative; }
+  .bottombar button { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; border: 0; border-radius: 0; background: transparent; color: var(--muted); padding: 4px 0; min-height: 0; }
+  .bottombar .ico { font-size: 20px; line-height: 1; }
+  .bottombar .lbl { font-size: 11px; }
+  .bottombar button.on { color: var(--accent); }
+  .bottombar button.on .lbl { font-weight: 600; }
+
+  /* drawers, sheets and the backdrop stop above the bar so it stays usable */
+  .app.mobile .backdrop { bottom: calc(var(--bar-h) + env(safe-area-inset-bottom)); }
+  .app.mobile .side { bottom: calc(var(--bar-h) + env(safe-area-inset-bottom)); padding-bottom: 0; border-bottom: 1px solid var(--border); }
+  .app.mobile .right { bottom: calc(var(--bar-h) + env(safe-area-inset-bottom)); padding-bottom: 0; }
+
+  .search-sheet { display: flex; gap: 8px; align-items: flex-start; position: fixed; z-index: 45; top: 0; left: 0; right: 0; padding: 10px; padding-top: max(10px, env(safe-area-inset-top)); background: var(--bg); border-bottom: 1px solid var(--border); box-shadow: 0 8px 24px #0006; }
+  .search-sheet .search-box { flex: 1; }
+  .search-results { top: calc(64px + env(safe-area-inset-top)); }
+
+  .more-menu { display: flex; position: fixed; right: 8px; bottom: calc(var(--bar-h) + env(safe-area-inset-bottom) + 8px); top: auto; margin: 0; }
+  .more-menu .menu-link { padding: 10px 12px; min-height: 42px; color: var(--fg); text-decoration: none; border-radius: 8px; }
+  .toast { display: block; position: fixed; bottom: calc(var(--bar-h) + env(safe-area-inset-bottom) + 12px); left: 50%; transform: translateX(-50%); background: var(--bg2); border: 1px solid var(--border); padding: 8px 14px; border-radius: 999px; box-shadow: 0 4px 16px #0006; z-index: 60; max-width: 90vw; font-size: 13px; }
+  .app.mobile .doc, .app.mobile .scroll { -webkit-overflow-scrolling: touch; }
+  .pdf-page { height: calc(100dvh - 60px - var(--bar-h)); }
+}
+
+/* outline icons */
+.icon { fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; flex: none; vertical-align: -3px; }
+.icon.spin { animation: spin 0.9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.tb-btn, .more-menu button, .menu-link { display: inline-flex; align-items: center; gap: 6px; }
+.rbtn .ico { display: flex; align-items: center; justify-content: center; }
+.bottombar .ico { display: flex; align-items: center; justify-content: center; height: 24px; }
+.drawer-head button { display: inline-flex; align-items: center; justify-content: center; }
+.tab .x .icon { vertical-align: -2px; }
+.icon-more path { stroke-width: 3.4; }

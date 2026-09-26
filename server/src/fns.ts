@@ -5,7 +5,7 @@ import { mkdir, readFile, readdir, rename as fsRename, rm, stat, utimes, writeFi
 import path from "node:path";
 import type { Commit } from "../../shared/types";
 import { textHash } from "../../shared/hash";
-import { type Backend, ConflictError, ExistsError, NotEmptyError, NotFoundError, type WriteOpts, safePath, walk } from "./backend";
+import { type Actor, type Backend, ConflictError, ExistsError, NotEmptyError, NotFoundError, type WriteOpts, safePath, walk } from "./backend";
 
 export interface FnsOptions {
   url: string;
@@ -53,8 +53,10 @@ export class FnsBackend implements Backend {
   // ---------- HTTP ----------
   // FNS wants "Authorization: Bearer <token>" and identifies the caller by X-Client, which must match the
   // token's "Client restriction" (or the restriction must be "*").
-  private headers(user?: string, json = false) {
-    const name = user ? `${this.o.client} (${user})` : this.o.client;
+  private headers(actor?: Actor, json = false) {
+    // the client TYPE (X-Client) must stay constant because the token is restricted to it; the client NAME is a free label,
+    // so it carries the signed-in person. FNS shows it in its access log and on note history entries.
+    const name = actor ? `${this.o.client} (${actor.label})` : this.o.client;
     return {
       Authorization: `Bearer ${this.o.token}`,
       "X-Client": this.o.client,
@@ -70,12 +72,12 @@ export class FnsBackend implements Backend {
     return fetch(u, { headers: this.headers() });
   }
 
-  private async api<T>(p: string, query: Record<string, string | number | boolean | undefined>, init?: { method: string; body?: unknown; user?: string }): Promise<T> {
+  private async api<T>(p: string, query: Record<string, string | number | boolean | undefined>, init?: { method: string; body?: unknown; actor?: Actor }): Promise<T> {
     const u = new URL(this.o.url.replace(/\/$/, "") + p);
     for (const [k, v] of Object.entries(query)) if (v !== undefined) u.searchParams.set(k, String(v));
     const res = await fetch(u, {
       method: init?.method ?? "GET",
-      headers: this.headers(init?.user, init?.body !== undefined),
+      headers: this.headers(init?.actor, init?.body !== undefined),
       body: init?.body !== undefined ? JSON.stringify(init.body) : undefined,
     });
     if (!res.ok) throw new Error(`${p}: HTTP ${res.status}`);
@@ -255,28 +257,28 @@ export class FnsBackend implements Backend {
     const saved = await this.api<{ contentHash?: string }>(
       "/api/note",
       {},
-      { method: "POST", user: o.user, body: { vault: this.o.vault, path: rel, content, mtime: Date.now(), ...(o.createOnly ? { createOnly: true } : {}) } },
+      { method: "POST", actor: o.actor, body: { vault: this.o.vault, path: rel, content, mtime: Date.now(), ...(o.createOnly ? { createOnly: true } : {}) } },
     );
     await mkdir(path.dirname(abs), { recursive: true });
     await writeFile(abs, content, "utf8");
     if (saved?.contentHash) await this.setState((st) => void (st[`n:${rel}`] = String(saved.contentHash)));
   }
 
-  async mkdir(rel: string, user?: string) {
+  async mkdir(rel: string, actor?: Actor) {
     if (!this.canWrite) throw new Error("writes disabled");
     const abs = safePath(this.o.mirrorDir, rel);
-    await this.api("/api/folder", {}, { method: "POST", user, body: { vault: this.o.vault, path: rel } });
+    await this.api("/api/folder", {}, { method: "POST", actor, body: { vault: this.o.vault, path: rel } });
     await mkdir(abs, { recursive: true });
   }
 
-  async rename(from: string, to: string, user?: string) {
+  async rename(from: string, to: string, actor?: Actor) {
     if (!this.canWrite) throw new Error("writes disabled");
     const src = safePath(this.o.mirrorDir, from);
     const dst = safePath(this.o.mirrorDir, to);
     await this.settled();
     if ((await this.liveNote(from)) === undefined) throw new NotFoundError();
     if ((await this.liveNote(to)) !== undefined) throw new ExistsError();
-    await this.api("/api/note/rename", {}, { method: "POST", user, body: { vault: this.o.vault, oldPath: from, path: to } });
+    await this.api("/api/note/rename", {}, { method: "POST", actor, body: { vault: this.o.vault, oldPath: from, path: to } });
     await mkdir(path.dirname(dst), { recursive: true });
     await fsRename(src, dst).catch(() => {});
     await this.setState((st) => {
@@ -287,21 +289,21 @@ export class FnsBackend implements Backend {
     });
   }
 
-  async remove(rel: string, user?: string) {
+  async remove(rel: string, actor?: Actor) {
     if (!this.canWrite) throw new Error("writes disabled");
     const abs = safePath(this.o.mirrorDir, rel);
     await this.settled();
     if ((await this.liveNote(rel)) === undefined) throw new NotFoundError();
-    await this.api("/api/note", { vault: this.o.vault, path: rel }, { method: "DELETE", user }); // FNS keeps deleted notes in its recycle bin
+    await this.api("/api/note", { vault: this.o.vault, path: rel }, { method: "DELETE", actor }); // FNS keeps deleted notes in its recycle bin
     await rm(abs, { force: true });
     await this.setState((st) => void delete st[`n:${rel}`]);
   }
 
-  async removeDir(rel: string, user?: string) {
+  async removeDir(rel: string, actor?: Actor) {
     if (!this.canWrite) throw new Error("writes disabled");
     const abs = safePath(this.o.mirrorDir, rel);
     if ((await readdir(abs).catch(() => ["x"])).length) throw new NotEmptyError();
-    await this.api("/api/folder", {}, { method: "DELETE", user, body: { vault: this.o.vault, path: rel } });
+    await this.api("/api/folder", {}, { method: "DELETE", actor, body: { vault: this.o.vault, path: rel } });
     await rm(abs, { recursive: true, force: true });
   }
 }

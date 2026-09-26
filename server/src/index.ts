@@ -4,7 +4,7 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { AppConfig } from "../../shared/types";
-import { type Backend, ConflictError, ExistsError, GitBackend, NotEmptyError, NotFoundError, checkNewPath, safePath } from "./backend";
+import { type Actor, type Backend, ConflictError, ExistsError, GitBackend, NotEmptyError, NotFoundError, checkNewPath, safePath } from "./backend";
 import { FnsBackend } from "./fns";
 import { setupAuth } from "./auth";
 
@@ -115,9 +115,12 @@ function writeGuard(c: Context): Response | undefined {
   return undefined;
 }
 
-const who = (c: Context) => {
+/** The signed-in person, for attribution (FNS client name, git commit author). Undefined when login is off. */
+const who = (c: Context): Actor | undefined => {
   const u = auth.userOf(c);
-  return u?.name || u?.email;
+  if (!u) return undefined;
+  const label = u.name && u.email ? `${u.name} (${u.email})` : u.name || u.email || u.sub;
+  return { label, name: u.name, email: u.email };
 };
 
 function failed(c: Context, e: unknown): Response {
@@ -147,7 +150,7 @@ app.put("/api/file", async (c) => {
   if (Buffer.byteLength(b.content) > MAX_NOTE_BYTES) return c.json({ error: "note is too large (2 MB limit)" }, 413);
   try {
     const p = checkNewPath(b.path, "note");
-    await backend.write!(p, b.content, { baseHash: b.baseHash, createOnly: !!b.createOnly, user: who(c), message: b.message });
+    await backend.write!(p, b.content, { baseHash: b.baseHash, createOnly: !!b.createOnly, actor: who(c), message: b.message });
     return c.json({ ok: true, path: p });
   } catch (e) {
     return failed(c, e);

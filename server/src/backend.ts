@@ -22,10 +22,18 @@ export interface Backend {
   isValidRef(ref: string): boolean;
   /** editing operations (present only when the backend can write) */
   write?(rel: string, content: string, o?: WriteOpts): Promise<void>;
-  mkdir?(rel: string, user?: string): Promise<void>;
-  rename?(from: string, to: string, user?: string): Promise<void>;
-  remove?(rel: string, user?: string): Promise<void>;
-  removeDir?(rel: string, user?: string): Promise<void>;
+  mkdir?(rel: string, actor?: Actor): Promise<void>;
+  rename?(from: string, to: string, actor?: Actor): Promise<void>;
+  remove?(rel: string, actor?: Actor): Promise<void>;
+  removeDir?(rel: string, actor?: Actor): Promise<void>;
+}
+
+/** Who is making an edit (from the signed-in OIDC identity), so it can be attributed in FNS logs or git history. */
+export interface Actor {
+  /** display text, e.g. "Danny Cherry (danny@example.com)" */
+  label: string;
+  name?: string;
+  email?: string;
 }
 
 export interface WriteOpts {
@@ -33,7 +41,7 @@ export interface WriteOpts {
   baseHash?: string;
   /** fail instead of overwriting an existing note */
   createOnly?: boolean;
-  user?: string;
+  actor?: Actor;
   message?: string;
 }
 
@@ -120,9 +128,12 @@ export class GitBackend implements Backend {
     return (await this.git("show", `${ref}:./${rel}`)).stdout;
   }
 
-  private async commit(msg: string, ...paths: string[]) {
+  private async commit(msg: string, actor: Actor | undefined, ...paths: string[]) {
+    // the person who made the edit is the commit author; the server's own git identity stays the committer
+    const clean = (t: string) => t.replace(/[<>\r\n]/g, "").trim();
+    const author = actor?.name || actor?.email ? ["--author", `${clean(actor.name || actor.email!)} <${clean(actor.email || "noreply@obsidianweb.invalid")}>`] : [];
     try {
-      await this.git("commit", "-m", msg, "--", ...paths);
+      await this.git("commit", ...author, "-m", msg, "--", ...paths);
     } catch {
       /* nothing changed */
     }
@@ -141,14 +152,14 @@ export class GitBackend implements Backend {
     await mkdir(path.dirname(abs), { recursive: true });
     await writeFile(abs, content, "utf8");
     await this.git("add", "--", rel);
-    await this.commit((o.message || `Update ${rel}`) + (o.user ? ` (by ${o.user})` : ""), rel);
+    await this.commit(o.message || `Update ${rel}`, o.actor, rel);
   }
 
   async mkdir(rel: string) {
     await mkdir(safePath(this.root, rel), { recursive: true }); // git tracks files, so an empty folder exists only on disk until a page is added
   }
 
-  async rename(from: string, to: string, user?: string) {
+  async rename(from: string, to: string, actor?: Actor) {
     const src = safePath(this.root, from);
     const dst = safePath(this.root, to);
     await stat(src).catch(() => {
@@ -157,15 +168,15 @@ export class GitBackend implements Backend {
     if (await stat(dst).then(() => true, () => false)) throw new ExistsError();
     await mkdir(path.dirname(dst), { recursive: true });
     await this.git("mv", "--", from, to);
-    await this.commit(`Rename ${from} to ${to}` + (user ? ` (by ${user})` : ""), from, to);
+    await this.commit(`Rename ${from} to ${to}`, actor, from, to);
   }
 
-  async remove(rel: string, user?: string) {
+  async remove(rel: string, actor?: Actor) {
     safePath(this.root, rel);
     await this.git("rm", "-q", "--", rel).catch(() => {
       throw new NotFoundError();
     });
-    await this.commit(`Delete ${rel}` + (user ? ` (by ${user})` : ""), rel);
+    await this.commit(`Delete ${rel}`, actor, rel);
   }
 
   async removeDir(rel: string) {

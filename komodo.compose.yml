@@ -13,6 +13,7 @@ services:
       - FNS_URL=${FNS_URL:?set FNS_URL, e.g. http://10.10.30.22:9000}
       - FNS_TOKEN=${FNS_TOKEN:?set FNS_TOKEN from the FNS admin panel}
       - FNS_VAULT=${FNS_VAULT:?set FNS_VAULT to the vault name}
+      - FNS_CLIENT=${FNS_CLIENT:-ObsidianWeb}
       - FNS_SYNC_INTERVAL=${FNS_SYNC_INTERVAL:-60}
       - ATTACHMENT_FOLDER=${ATTACHMENT_FOLDER:-}
       - DEFAULT_LAYOUT=${DEFAULT_LAYOUT:-doc}

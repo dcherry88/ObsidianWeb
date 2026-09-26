@@ -18,6 +18,7 @@ services:
       FNS_URL: http://fast-note-sync:9000
       FNS_TOKEN: ${FNS_TOKEN}         # API token from the service's admin panel ("Copy API Config")
       FNS_VAULT: ${FNS_VAULT}         # vault name exactly as shown in the plugin/admin panel
+      FNS_CLIENT: ${FNS_CLIENT:-ObsidianWeb}
       FNS_SYNC_INTERVAL: ${FNS_SYNC_INTERVAL:-60}
       ATTACHMENT_FOLDER: ${ATTACHMENT_FOLDER:-}
       DEFAULT_LAYOUT: ${DEFAULT_LAYOUT:-doc}

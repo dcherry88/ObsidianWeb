@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 const dir = path.resolve(process.argv[2] ?? "vault");
 const PORT = Number(process.env.PORT ?? 9100);
 const TOKEN = process.env.TOKEN ?? "secret";
-const AUTH = process.env.MOCK_AUTH ?? "raw";
+const CLIENT = process.env.MOCK_CLIENT ?? "ObsidianWeb"; // token "client restriction"
 const VAULT = process.env.VAULT_NAME ?? "test";
 
 const all = [];
@@ -30,10 +30,12 @@ http
   .createServer((req, res) => {
     const u = new URL(req.url, "http://x");
     const auth = req.headers.authorization ?? "";
-    const good = AUTH === "bearer" ? auth === `Bearer ${TOKEN}` : auth === TOKEN;
+    const good = auth === `Bearer ${TOKEN}`;
+    const clientOk = CLIENT === "*" || (req.headers["x-client"] ?? "") === CLIENT;
     const json = (s, status = 200) => (res.writeHead(status, { "content-type": "application/json" }), res.end(s));
     if (u.pathname === "/api/health") return json(ok("ok"));
-    if (!good) return json(fail(507, "Not logged in"), 401);
+    if (!good) return json(fail(307, "Not logged in. Please log in first."));
+    if (!clientOk) return json({ code: 315, status: false, message: "Auth token Scope restricted", details: `Permission denied: ${u.pathname}` });
     if (u.searchParams.get("vault") && u.searchParams.get("vault") !== VAULT && !u.pathname.includes("history")) return json(fail(414, "Note Vault does not exist"));
     const page = Number(u.searchParams.get("page") ?? 1), size = Math.min(Number(u.searchParams.get("pageSize") ?? 10), 100);
     const paged = (items) => ok({ list: items.slice((page - 1) * size, page * size), pager: { page, pageSize: size, totalRows: items.length } });
@@ -58,4 +60,4 @@ http
     }
     json(fail(404, "unknown endpoint"), 404);
   })
-  .listen(PORT, () => console.log(`mock FNS on :${PORT}, vault "${VAULT}", ${all.length} files, auth=${AUTH}`));
+  .listen(PORT, () => console.log(`mock FNS on :${PORT}, vault "${VAULT}", ${all.length} files, client=${CLIENT}`));

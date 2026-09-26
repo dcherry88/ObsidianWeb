@@ -13,8 +13,8 @@ export interface FnsOptions {
   mirrorDir: string;
   stateFile: string;
   intervalSec: number;
-  /** "auto" tries the bare token then "Bearer <token>" */
-  authScheme: "auto" | "raw" | "bearer";
+  /** client name sent as X-Client; must match the token's client restriction */
+  client: string;
 }
 
 export interface SyncStatus {
@@ -41,33 +41,26 @@ const toIso = (v: unknown): string => {
 export class FnsBackend implements Backend {
   canWrite = false;
   status: SyncStatus = { running: false, notes: 0, files: 0, changed: 0 };
-  private scheme: "raw" | "bearer";
   private timer?: NodeJS.Timeout;
 
-  constructor(private o: FnsOptions) {
-    this.scheme = o.authScheme === "bearer" ? "bearer" : "raw";
-  }
+  constructor(private o: FnsOptions) {}
 
   // ---------- HTTP ----------
-  private headers(scheme: "raw" | "bearer") {
-    const value = scheme === "bearer" ? `Bearer ${this.o.token}` : this.o.token;
-    return { Authorization: value, token: this.o.token };
+  // FNS wants "Authorization: Bearer <token>" and identifies the caller by X-Client, which must match the
+  // token's "Client restriction" (or the restriction must be "*").
+  private headers() {
+    return {
+      Authorization: `Bearer ${this.o.token}`,
+      "X-Client": this.o.client,
+      "X-Client-Name": this.o.client,
+      "X-Client-Version": "1.0",
+    };
   }
 
-  private async fetchRaw(p: string, query: Record<string, string | number | boolean | undefined>) {
+  private fetchRaw(p: string, query: Record<string, string | number | boolean | undefined>) {
     const u = new URL(this.o.url.replace(/\/$/, "") + p);
     for (const [k, v] of Object.entries(query)) if (v !== undefined) u.searchParams.set(k, String(v));
-    const attempt = (scheme: "raw" | "bearer") => fetch(u, { headers: this.headers(scheme) });
-    let res = await attempt(this.scheme);
-    if ((res.status === 401 || res.status === 403) && this.o.authScheme === "auto") {
-      const other = this.scheme === "raw" ? "bearer" : "raw";
-      const res2 = await attempt(other);
-      if (res2.ok) {
-        this.scheme = other;
-        res = res2;
-      }
-    }
-    return res;
+    return fetch(u, { headers: this.headers() });
   }
 
   private async api<T>(p: string, query: Record<string, string | number | boolean | undefined>): Promise<T> {
@@ -75,7 +68,7 @@ export class FnsBackend implements Backend {
     if (!res.ok) throw new Error(`${p}: HTTP ${res.status}`);
     const j = (await res.json()) as { code?: number; status?: boolean; message?: string; data?: T };
     if (j.status === false || (typeof j.code === "number" && j.code <= 0)) {
-      const hint = j.code === 315 || /scope/i.test(j.message ?? "") ? " (this token is not allowed to use the REST API; it needs a token with the \"rest\" scope)" : "";
+      const hint = j.code === 315 || j.code === 314 || /scope|client/i.test(j.message ?? "") ? ` (check the FNS token: it needs the REST protocol, read access to notes and attachments, this vault, and a Client restriction equal to "${this.o.client}" or "*")` : "";
       throw new Error(`${p}: ${j.message ?? "error"} (code ${j.code})${hint}`);
     }
     return j.data as T;

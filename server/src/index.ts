@@ -33,7 +33,7 @@ if (SOURCE === "fns") {
     mirrorDir: VAULT,
     stateFile: path.join(DATA_DIR, "fns-state.json"),
     intervalSec: Number(env.FNS_SYNC_INTERVAL ?? 60),
-    authScheme: (["raw", "bearer"].includes(env.FNS_AUTH_SCHEME ?? "") ? env.FNS_AUTH_SCHEME : "auto") as "auto" | "raw" | "bearer",
+    client: env.FNS_CLIENT || "ObsidianWeb",
   });
   backend = fns;
 } else {

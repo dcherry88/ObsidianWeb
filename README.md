@@ -200,12 +200,14 @@ How it works: on start and then every `FNS_SYNC_INTERVAL` seconds (default 60; `
 |---|---|
 | `VAULT_SOURCE` | `fns` (default is `git`) |
 | `FNS_URL` | Base URL of the service, e.g. `http://fast-note-sync:9000` |
-| `FNS_TOKEN` | API token (admin panel, "Copy API Config") |
+| `FNS_TOKEN` | An API token created in the FNS admin panel (see below) |
 | `FNS_VAULT` | Vault name as shown in the plugin/admin panel |
 | `FNS_SYNC_INTERVAL` | Seconds between syncs (default 60) |
-| `FNS_AUTH_SCHEME` | `auto` (default), `raw` or `bearer`: how the token is sent in the `Authorization` header |
+| `FNS_CLIENT` | Client name sent as `X-Client` (default `ObsidianWeb`); must equal the token's Client restriction |
 | `ATTACHMENT_FOLDER` | Attachment folder (`.obsidian` settings are not synced, so set this if yours isn't the vault root) |
 | `DATA_DIR` | Where the synced copy lives (default `./data`, `/data` in Docker; use a volume) |
+
+**Create a dedicated token in the FNS admin panel** (the "Copy API Config" token is for the Obsidian plugin and is bound to that client). Recommended settings: name `obsidianweb`; **Client restriction** `ObsidianWeb` (must match `FNS_CLIENT`); **Protocol** REST only; **Content restriction** Note read-only and Attachment read-only; **Vault** only your vault; optionally restrict the IP to the container's address. FNS answers `code 315 "Scope restricted"` when the protocol, function, vault or client doesn't match, and `code 307` when the token isn't accepted.
 
 > Built from FNS's published REST documentation and tested against a mock of that API (`scripts/mock-fns.mjs`: full sync, incremental update, outage handling, history), **not** against a real FNS instance. The exact JSON field names could differ; if a first sync fails, check `/api/sync/status` and the container log and open an issue.
 

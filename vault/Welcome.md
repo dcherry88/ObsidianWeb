@@ -1,16 +1,29 @@
 ---
 title: Welcome
-tags: [index]
+tags: [index, guide]
+aliases: [Home]
 ---
 # Welcome to the test vault
 
-Jump to [[Projects/Alpha/Overview|Alpha]], [[Projects/Beta/Overview]], or today's [[Daily/2026-09-25]].
+This vault exists to exercise every feature of ObsidianWeb. Start with the **[[Guide/Getting Started|Getting Started]]** page, then wander.
 
-- [x] Render headings
-- [ ] Render task lists
-> [!note] Callout
-> Obsidian callouts should render too.
+## Tour
+| Feature | Where to look |
+|---|---|
+| Markdown rendering | [[Guide/Markdown Showcase]] |
+| Wikilinks and backlinks | [[Guide/Links and Backlinks]] |
+| Tags (frontmatter and inline) | [[Guide/Tags Demo]] |
+| Images and attachments | [[Reference/Images]] |
+| Nested folders | [[Archive/2025/Q4/Retro]] |
+| Version history and diffs | [[Guide/History Demo]] |
 
-See also [[Reference/Markdown Cheatsheet]] #index
+## Projects
+- [[Projects/Alpha/Overview|Alpha]]: the flagship, in progress
+- [[Projects/Beta/Overview|Beta]]: waiting on Alpha
+- [[Projects/Gamma/Overview|Gamma]]: an idea
 
-Second edit: added a line for history testing.
+## People
+[[People/Ada Lovelace]], [[People/Grace Hopper]]
+
+> [!tip] Try this
+> Open the **Backlinks** tab on any page, or click a `#tag` to see every note that uses it. #index

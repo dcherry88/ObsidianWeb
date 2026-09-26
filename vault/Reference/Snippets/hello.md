@@ -1,3 +1,6 @@
+---
+tags: [reference, snippet]
+---
 # Code sample
 ```js
 console.log("hello vault");

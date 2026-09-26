@@ -1,7 +1,10 @@
+---
+tags: [reference, markdown]
+---
 # Markdown Cheatsheet
 **bold**, *italic*, ~~strike~~, `inline code`, ==highlight==
 
 1. Ordered
 2. List
 
-[External link](https://example.com)
+[External link](https://example.com). Fuller demo: [[Guide/Markdown Showcase]]. #reference

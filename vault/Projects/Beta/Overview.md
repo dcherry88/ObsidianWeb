@@ -1,5 +1,9 @@
 ---
 tags: [project, beta]
+status: blocked
 ---
 # Beta
-Backlinks should show [[Projects/Alpha/Overview]] here.
+
+Blocked until [[Projects/Alpha/Overview|Alpha]] ships. Owner: [[People/Grace Hopper]]. #project/beta #status/blocked
+
+See last quarter's [[Archive/2025/Q4/Retro]] for what went wrong before.

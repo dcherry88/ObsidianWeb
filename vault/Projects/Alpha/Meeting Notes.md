@@ -1,7 +1,13 @@
+---
+tags: [project, alpha, meeting]
+---
 # Meeting Notes
-Attendees: A, B, C
+
+Attendees: [[People/Ada Lovelace]], [[People/Grace Hopper]], Sam
 
 | Item | Owner | Due |
 |------|-------|-----|
-| Spec | A | Fri |
-| Build | B | Next wk |
+| Spec | Ada | Fri |
+| Build | Grace | Next week |
+
+Decisions: keep scope small. Follow-up in [[Projects/Alpha/Roadmap]]. #project/alpha #meeting

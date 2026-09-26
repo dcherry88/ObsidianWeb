@@ -3,6 +3,6 @@ tags: [guide, history]
 ---
 # History Demo
 
-This note has been edited across several commits.
+This note has been edited across several commits. Open the **History** panel and click an older commit to view that version.
 
-Current version: 1. Changes so far: created.
+Current version: 2. Changes so far: created, expanded.

@@ -18,6 +18,8 @@ export interface FnsOptions {
   client: string;
   /** allow the editing operations (the token must also permit note writes) */
   canWrite?: boolean;
+  /** send edits as X-Client "<client>-<person>" (the token's Client restriction must then be a wildcard such as "ObsidianWeb*") */
+  clientPerUser?: boolean;
 }
 
 export interface SyncStatus {
@@ -34,6 +36,15 @@ interface RemoteItem {
   path: string;
   sig: string;
 }
+
+/** short, log-friendly id for a person: "Ada Lovelace" -> "ada-lovelace" */
+const personSlug = (a: Actor) =>
+  (a.name || a.email?.split("@")[0] || a.label)
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40) || "user";
 
 const toIso = (v: unknown): string => {
   if (typeof v === "number") return new Date(v < 1e12 ? v * 1000 : v).toISOString();
@@ -57,9 +68,10 @@ export class FnsBackend implements Backend {
     // the client TYPE (X-Client) must stay constant because the token is restricted to it; the client NAME is a free label,
     // so it carries the signed-in person. FNS shows it in its access log and on note history entries.
     const name = actor ? `${this.o.client} (${actor.label})` : this.o.client;
+    const type = actor && this.o.clientPerUser ? `${this.o.client}-${personSlug(actor)}` : this.o.client;
     return {
       Authorization: `Bearer ${this.o.token}`,
-      "X-Client": this.o.client,
+      "X-Client": type,
       "X-Client-Name": encodeURIComponent(name),
       "X-Client-Version": "1.0",
       ...(json ? { "Content-Type": "application/json" } : {}),
@@ -83,7 +95,7 @@ export class FnsBackend implements Backend {
     if (!res.ok) throw new Error(`${p}: HTTP ${res.status}`);
     const j = (await res.json()) as { code?: number; status?: boolean; message?: string; data?: T };
     if (j.status === false || (typeof j.code === "number" && j.code <= 0)) {
-      const hint = j.code === 315 || j.code === 314 || /scope|client/i.test(j.message ?? "") ? ` (check the FNS token: it needs the REST protocol, read access${this.canWrite ? " and write access" : ""} to notes and attachments, this vault, and a Client restriction equal to "${this.o.client}" or "*")` : "";
+      const hint = j.code === 315 || j.code === 314 || /scope|client/i.test(j.message ?? "") ? ` (check the FNS token: it needs the REST protocol, read access${this.canWrite ? " and write access" : ""} to notes and attachments, this vault, and a Client restriction equal to "${this.o.client}"${this.o.clientPerUser ? ` with a wildcard (for example "${this.o.client}*"), because edits are sent as "${this.o.client}-<person>"` : ""} or "*")` : "";
       throw Object.assign(new Error(`${p}: ${j.message ?? "error"} (code ${j.code})${hint}`), { fnsCode: j.code });
     }
     return j.data as T;

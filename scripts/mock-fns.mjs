@@ -50,7 +50,9 @@ http
     if (u.pathname === "/__log") return json(JSON.stringify(log));
     if (u.pathname === "/api/health") return json(ok("ok"));
     if ((req.headers.authorization ?? "") !== `Bearer ${TOKEN}`) return json(fail(307, "Not logged in. Please log in first."));
-    if (CLIENT !== "*" && (req.headers["x-client"] ?? "") !== CLIENT)
+    const xc = String(req.headers["x-client"] ?? "");
+    const clientOk = CLIENT === "*" || (CLIENT.endsWith("*") ? xc.startsWith(CLIENT.slice(0, -1)) : xc === CLIENT);
+    if (!clientOk)
       return json(fail(315, "Auth token Scope restricted", `Permission denied: ${u.pathname}`));
     let bodyText = "";
     for await (const c of req) bodyText += c;
@@ -75,13 +77,13 @@ http
       if (body.createOnly && ex) return json(fail(408, "Note already exists"));
       const n = { content: body.content, mtime: body.mtime ?? Date.now(), version: (ex?.version ?? 0) + 1, id: ex?.id ?? nextId++ };
       notes.set(body.path, n);
-      log.push({ op: ex ? "update" : "create", path: body.path, by: who });
+      log.push({ op: ex ? "update" : "create", path: body.path, by: who, client: xc });
       return json(ok(noteMeta(body.path)));
     }
     if (u.pathname === "/api/note" && req.method === "DELETE") {
       if (!notes.has(q)) return json(fail(428, "Note does not exist"));
       notes.delete(q);
-      log.push({ op: "delete", path: q, by: who });
+      log.push({ op: "delete", path: q, by: who, client: xc });
       return json(ok({ path: q }));
     }
     if (u.pathname === "/api/note/rename" && req.method === "POST") {
@@ -89,7 +91,7 @@ http
       if (!n) return json(fail(428, "Note does not exist"));
       notes.delete(body.oldPath);
       notes.set(body.path, n);
-      log.push({ op: "rename", from: body.oldPath, to: body.path, by: who });
+      log.push({ op: "rename", from: body.oldPath, to: body.path, by: who, client: xc });
       return json(ok({ path: body.path }));
     }
     if (u.pathname === "/api/folder" && req.method === "POST") {

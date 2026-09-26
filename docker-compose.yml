@@ -19,6 +19,7 @@ services:
       FNS_TOKEN: ${FNS_TOKEN}         # API token from the service's admin panel ("Copy API Config")
       FNS_VAULT: ${FNS_VAULT}         # vault name exactly as shown in the plugin/admin panel
       FNS_CLIENT: ${FNS_CLIENT:-ObsidianWeb}
+      FNS_CLIENT_PER_USER: ${FNS_CLIENT_PER_USER:-}   # 1 = edits sent as ObsidianWeb-<person>; token Client restriction must be a wildcard like ObsidianWeb*
       ALLOW_WRITE: ${ALLOW_WRITE:-}   # 1 = allow editing (the FNS token must also permit note writes)
       FNS_SYNC_INTERVAL: ${FNS_SYNC_INTERVAL:-60}
       ATTACHMENT_FOLDER: ${ATTACHMENT_FOLDER:-}

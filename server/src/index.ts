@@ -35,6 +35,7 @@ if (SOURCE === "fns") {
     intervalSec: Number(env.FNS_SYNC_INTERVAL ?? 60),
     client: env.FNS_CLIENT || "ObsidianWeb",
     canWrite: flag(env.ALLOW_WRITE),
+    clientPerUser: flag(env.FNS_CLIENT_PER_USER),
   });
   backend = fns;
 } else {
@@ -131,7 +132,7 @@ function failed(c: Context, e: unknown): Response {
   const msg = (e as Error)?.message ?? "";
   if (msg === "bad path" || msg.startsWith("notes must")) return c.json({ error: msg }, 400);
   console.error("[edit]", msg);
-  return c.json({ error: "the change could not be saved: " + msg.slice(0, 200) }, 502);
+  return c.json({ error: "the change could not be saved: " + msg.slice(0, 500) }, 502);
 }
 
 async function body<T>(c: Context): Promise<T | undefined> {

@@ -35,7 +35,7 @@ http
     const json = (s, status = 200) => (res.writeHead(status, { "content-type": "application/json" }), res.end(s));
     if (u.pathname === "/api/health") return json(ok("ok"));
     if (!good) return json(fail(307, "Not logged in. Please log in first."));
-    if (!clientOk) return json({ code: 315, status: false, message: "Auth token Scope restricted", details: `Permission denied: ${u.pathname}` });
+    if (!clientOk) return json(JSON.stringify({ code: 315, status: false, message: "Auth token Scope restricted", details: `Permission denied: ${u.pathname}` }));
     if (u.searchParams.get("vault") && u.searchParams.get("vault") !== VAULT && !u.pathname.includes("history")) return json(fail(414, "Note Vault does not exist"));
     const page = Number(u.searchParams.get("page") ?? 1), size = Math.min(Number(u.searchParams.get("pageSize") ?? 10), 100);
     const paged = (items) => ok({ list: items.slice((page - 1) * size, page * size), pager: { page, pageSize: size, totalRows: items.length } });

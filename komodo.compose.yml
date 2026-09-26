@@ -1,0 +1,30 @@
+# ObsidianWeb for Komodo (or plain `docker compose -f komodo.compose.yml up -d --build`).
+# Uses an EXISTING Fast Note Sync service and requires OIDC sign-in. All settings come from the
+# stack's environment (Komodo writes them to .env), see the ${VARS} below.
+services:
+  obsidianweb:
+    container_name: obsidianweb
+    build: .
+    image: obsidianweb:local
+    restart: unless-stopped
+    environment:
+      - TZ=America/Chicago
+      - VAULT_SOURCE=fns
+      - FNS_URL=${FNS_URL:?set FNS_URL, e.g. http://10.10.30.22:9000}
+      - FNS_TOKEN=${FNS_TOKEN:?set FNS_TOKEN from the FNS admin panel}
+      - FNS_VAULT=${FNS_VAULT:?set FNS_VAULT to the vault name}
+      - FNS_SYNC_INTERVAL=${FNS_SYNC_INTERVAL:-60}
+      - ATTACHMENT_FOLDER=${ATTACHMENT_FOLDER:-}
+      - DEFAULT_LAYOUT=${DEFAULT_LAYOUT:-doc}
+      - PUBLIC_URL=${PUBLIC_URL:?set PUBLIC_URL to the https address users open}
+      - OIDC_ISSUER=${OIDC_ISSUER:?set OIDC_ISSUER (Pocket ID base URL)}
+      - OIDC_CLIENT_ID=${OIDC_CLIENT_ID:?set OIDC_CLIENT_ID}
+      - OIDC_CLIENT_SECRET=${OIDC_CLIENT_SECRET:?set OIDC_CLIENT_SECRET}
+    volumes:
+      - "/opt/docker/appdata/obsidianweb/data:/data:rw"
+    networks:
+      vlan103_ipvlan:
+        ipv4_address: ${OBSIDIANWEB_IP:?set OBSIDIANWEB_IP to a free 10.10.30.x address}
+networks:
+  vlan103_ipvlan:
+    external: true

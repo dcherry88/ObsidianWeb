@@ -209,6 +209,9 @@ How it works: on start and then every `FNS_SYNC_INTERVAL` seconds (default 60; `
 
 > Built from FNS's published REST documentation and tested against a mock of that API (`scripts/mock-fns.mjs`: full sync, incremental update, outage handling, history), **not** against a real FNS instance. The exact JSON field names could differ; if a first sync fails, check `/api/sync/status` and the container log and open an issue.
 
+### Deploying with Komodo
+`komodo.compose.yml` runs ObsidianWeb alone, against an FNS service you already have, with OIDC required (the container refuses to start without the settings). Create a Komodo stack that clones this repo (`file_paths: komodo.compose.yml`, build enabled) and fill in the environment: `FNS_URL`, `FNS_TOKEN`, `FNS_VAULT`, `PUBLIC_URL`, `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OBSIDIANWEB_IP` (and optionally `ATTACHMENT_FOLDER`, `FNS_SYNC_INTERVAL`, `DEFAULT_LAYOUT`). Its network settings assume an external ipvlan named `vlan103_ipvlan`; edit the file for your own network.
+
 ---
 
 ## Using the UI

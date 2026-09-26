@@ -24,6 +24,14 @@ export interface AppConfig {
   vaultPath?: string;
 }
 
+export interface WriteOptions {
+  /** hash (shared/hash.ts) of the text that was loaded; the save is refused if the note changed since */
+  baseHash?: string;
+  /** fail instead of overwriting an existing note */
+  createOnly?: boolean;
+  message?: string;
+}
+
 /** Everything the UI needs from a vault. Implemented by the server API and the static/GitHub provider. */
 export interface VaultProvider {
   canWrite: boolean;
@@ -31,7 +39,12 @@ export interface VaultProvider {
   tree(): Promise<string[]>;
   read(path: string, ref?: string): Promise<string>;
   history(path: string): Promise<Commit[]>;
-  write(path: string, content: string, message?: string): Promise<void>;
+  write(path: string, content: string, opts?: WriteOptions): Promise<void>;
+  /** structure editing (server mode with editing enabled) */
+  mkdir?(path: string): Promise<void>;
+  rename?(from: string, to: string): Promise<void>;
+  remove?(path: string): Promise<void>;
+  removeDir?(path: string): Promise<void>;
   /** URL for a non-markdown vault file (images, PDFs...) */
   assetUrl(path: string): string;
 }

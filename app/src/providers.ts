@@ -1,4 +1,4 @@
-import type { AppConfig, Commit, VaultProvider } from "../../shared/types";
+import type { AppConfig, Commit, VaultProvider, WriteOptions } from "../../shared/types";
 
 const enc = (p: string) => p.split("/").map(encodeURIComponent).join("/");
 
@@ -12,7 +12,48 @@ async function ok(r: Response): Promise<Response> {
   return r;
 }
 
-/** Talks to the Node server (local git). */
+/** The note changed elsewhere since it was opened; `current` is what is stored now. */
+export class ConflictError extends Error {
+  constructor(public current: string) {
+    super("This note changed elsewhere while you were editing it.");
+  }
+}
+export class ExistsError extends Error {
+  constructor() {
+    super("Something with that name already exists.");
+  }
+}
+export class NotEmptyError extends Error {
+  constructor() {
+    super("The folder is not empty.");
+  }
+}
+
+/** JSON write request with the server's structured errors turned into typed exceptions. */
+async function mutate(method: string, url: string, body?: unknown): Promise<void> {
+  const r = await fetch(url, {
+    method,
+    headers: body !== undefined ? { "content-type": "application/json" } : undefined,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  if (r.status === 401) {
+    location.assign("./auth/login?next=" + encodeURIComponent(location.pathname));
+    throw new Error("Signing in…");
+  }
+  if (r.ok) return;
+  let j: any = {};
+  try {
+    j = await r.json();
+  } catch {
+    j = { error: await r.text().catch(() => "") };
+  }
+  if (j.conflict) throw new ConflictError(j.current ?? "");
+  if (j.exists) throw new ExistsError();
+  if (j.notEmpty) throw new NotEmptyError();
+  throw new Error(j.error || `${r.status} request failed`);
+}
+
+/** Talks to the Node server (local git or Fast Note Sync). */
 export class ApiProvider implements VaultProvider {
   constructor(public canWrite: boolean) {}
   tree = async () => (await ok(await fetch("./api/tree"))).json() as Promise<string[]>;
@@ -21,15 +62,11 @@ export class ApiProvider implements VaultProvider {
     (await ok(await fetch(`./api/file?path=${encodeURIComponent(path)}${ref ? `&ref=${ref}` : ""}`))).text();
   history = async (path: string) =>
     (await ok(await fetch(`./api/history?path=${encodeURIComponent(path)}`))).json() as Promise<Commit[]>;
-  write = async (path: string, content: string, message?: string) => {
-    await ok(
-      await fetch("./api/file", {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ path, content, message }),
-      }),
-    );
-  };
+  write = (path: string, content: string, opts: WriteOptions = {}) => mutate("PUT", "./api/file", { path, content, ...opts });
+  mkdir = (path: string) => mutate("POST", "./api/folder", { path });
+  rename = (from: string, to: string) => mutate("POST", "./api/rename", { from, to });
+  remove = (path: string) => mutate("DELETE", `./api/file?path=${encodeURIComponent(path)}`);
+  removeDir = (path: string) => mutate("DELETE", `./api/folder?path=${encodeURIComponent(path)}`);
 }
 
 /** GitHub Pages: vault files + index.json are copied into the site at build time; history comes from the GitHub API. */

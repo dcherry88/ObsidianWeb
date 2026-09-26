@@ -1,3 +1,5 @@
+import { Icon } from "./Icon";
+
 interface Node {
   name: string;
   path: string;
@@ -7,12 +9,13 @@ interface Node {
 
 function build(files: string[]): Node {
   const root: Node = { name: "", path: "", children: new Map(), file: false };
-  for (const f of files) {
+  for (const entry of files) {
     let cur = root;
-    const parts = f.split("/");
+    const isDir = entry.endsWith("/"); // "Folder/" entries are (possibly empty) folders
+    const parts = entry.replace(/\/$/, "").split("/");
     parts.forEach((part, i) => {
       const path = parts.slice(0, i + 1).join("/");
-      if (!cur.children.has(part)) cur.children.set(part, { name: part, path, children: new Map(), file: i === parts.length - 1 });
+      if (!cur.children.has(part)) cur.children.set(part, { name: part, path, children: new Map(), file: !isDir && i === parts.length - 1 });
       cur = cur.children.get(part)!;
     });
   }
@@ -54,7 +57,7 @@ export function Tree(props: { files: string[]; open: Set<string>; toggle: (p: st
 
 const pretty = (s: string) => s.replace(/\.md$/, "");
 
-function NavBranch({ node, depth, open, toggle, current, onOpen }: any) {
+function NavBranch({ node, depth, open, toggle, current, onOpen, onDeleteFolder }: any) {
   const kids = sorted(node);
   // inside a folder: pages first, then sub-sections. At the top level: folders first, loose pages below them.
   const files = kids.filter((k: Node) => k.file);
@@ -71,8 +74,13 @@ function NavBranch({ node, depth, open, toggle, current, onOpen }: any) {
           <div class="nav-section">
             <div class={"nav-heading d" + Math.min(depth, 2)} style={{ paddingLeft: 14 + depth * 14 }} onClick={() => toggle(c.path)}>
               <span class="chev">{open.has(c.path) ? "▾" : "▸"}</span> {c.name}
+              {onDeleteFolder && c.children.size === 0 && (
+                <button class="row-del" title="Delete this empty folder" aria-label="Delete empty folder" onClick={(e) => (e.stopPropagation(), onDeleteFolder(c.path))}>
+                  <Icon name="trash" size={13} />
+                </button>
+              )}
             </div>
-            {open.has(c.path) && <NavBranch node={c} depth={depth + 1} open={open} toggle={toggle} current={current} onOpen={onOpen} />}
+            {open.has(c.path) && <NavBranch node={c} depth={depth + 1} open={open} toggle={toggle} current={current} onOpen={onOpen} onDeleteFolder={onDeleteFolder} />}
           </div>
         ),
       )}
@@ -81,6 +89,6 @@ function NavBranch({ node, depth, open, toggle, current, onOpen }: any) {
 }
 
 /** Wiki/doc-site style navigation: folders are section headings (expanded by default), pages are links beneath. */
-export function NavMenu(props: { files: string[]; open: Set<string>; toggle: (p: string) => void; current: string; onOpen: (p: string) => void }) {
+export function NavMenu(props: { files: string[]; open: Set<string>; toggle: (p: string) => void; current: string; onOpen: (p: string) => void; onDeleteFolder?: (p: string) => void }) {
   return <NavBranch node={build(props.files)} depth={0} {...props} />;
 }

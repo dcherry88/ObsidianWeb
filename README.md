@@ -24,7 +24,7 @@ It runs two ways from the same frontend:
 | Vault source | Folder in a public repo | A git repo folder **or** a [Fast Note Sync](https://github.com/haierkeys/fast-note-sync-service) service |
 | Vault visibility | Public only (the site is public) | Public or private (your network, your auth) |
 | History | GitHub API (60 requests/hour/visitor unauthenticated) | Local `git log`, no limits |
-| Editing | Read-only | Saves and commits to git (`ALLOW_WRITE=1`) |
+| Editing | Read-only | Create, edit, rename and delete pages and folders (`ALLOW_WRITE=1`): commits to git, or writes back to Fast Note Sync |
 | Auth | None | Optional OIDC login (Pocket ID, Entra ID, ...) |
 
 ## What it renders
@@ -158,7 +158,7 @@ Notes for containers:
 |---|---|---|
 | `VAULT_PATH` | `./vault` | Notes folder; must be inside a git repo |
 | `PORT` | `8787` | Listen port |
-| `ALLOW_WRITE` | off | `1`/`true` lets the UI save (each save is a git commit) |
+| `ALLOW_WRITE` | off | `1`/`true` turns on editing: create, edit, rename and delete pages and folders (git: each change is a commit; FNS: written back to FNS) |
 | `DEFAULT_LAYOUT` | `doc` | `doc` (Web mode) or `vault` (Obsidian mode) for first-time visitors |
 | `APP_DIST` | `./app/dist` | Where the built frontend is |
 | `VAULT_SOURCE` | `git` | `git` or `fns` (see [Vault from Fast Note Sync](#vault-from-fast-note-sync)) |
@@ -203,7 +203,7 @@ docker compose up -d --build
 ```
 The included `docker-compose.yml` runs both services. To use an FNS you already run, set the `FNS_*` variables on the `obsidianweb` service only.
 
-How it works: on start and then every `FNS_SYNC_INTERVAL` seconds (default 60; `0` disables the timer) the server lists notes and attachments through FNS's REST API, downloads the ones whose content hash changed into `/data/vault`, and removes ones that were deleted. If FNS is unreachable it keeps serving the last copy and shows the error at `/api/sync/status`. The **↻ Sync now** button in the top bar (or `POST /api/sync`) pulls from FNS immediately and waits for the result. Note history and diffs come from FNS's own per-note history. This mode is **read-only**.
+How it works: on start and then every `FNS_SYNC_INTERVAL` seconds (default 60; `0` disables the timer) the server lists notes and attachments through FNS's REST API, downloads the ones whose content hash changed into `/data/vault`, and removes ones that were deleted. If FNS is unreachable it keeps serving the last copy and shows the error at `/api/sync/status`. The **↻ Sync now** button in the top bar (or `POST /api/sync`) pulls from FNS immediately and waits for the result. Note history and diffs come from FNS's own per-note history. Editing is off by default; see [Editing on the hosted site](#editing-on-the-hosted-site).
 
 | Variable | Meaning |
 |---|---|
@@ -257,6 +257,23 @@ Komodo variables work too: put the client ID or secret in Komodo Variables and r
 - Don't edit the stack's Environment through an API or MCP tool that returns masked secrets: writing the text back would replace your real token and secret with the masked placeholders. Use the Komodo UI.
 - With `docker compose` directly: `docker compose -f komodo.compose.yml --env-file .env up -d --build`.
 
+### Editing on the hosted site
+Set `ALLOW_WRITE=1` on the server (it is off by default; the static Pages site is always read-only). In **Web** mode on a desktop browser you then get:
+- **Edit** on any page: a markdown editor with live preview, **Save** (or Ctrl/Cmd+S), **Discard**, and a warning before you leave with unsaved changes.
+- **Page** and **Folder** buttons at the top of the navigation to create pages and folders (new folders are created as needed; a new page opens straight in the editor).
+- **Rename** (also moves a page to another folder) and **Delete** on the page toolbar, and a trash icon on empty folders in the navigation.
+- Phones are view-only for now.
+
+**Conflicts.** When you save, the server first checks the stored version of the note. If it changed since you opened it (for example you edited it in Obsidian meanwhile), nothing is saved and you get a warning with **Show differences**, **Overwrite with my version**, **Load their version**, **Copy my text** and **Keep editing**.
+
+**With Fast Note Sync**, changes are written to FNS through its REST API, so your Obsidian apps receive them through their normal sync, and every save shows up in FNS's own history. The requests carry your signed-in name in the client name for the FNS logs. The FNS token must allow writes: in the FNS admin panel give it **Note: Read/Write** (Attachment can stay read-only; folder creation uses the same permission), with the REST protocol, your vault, and a Client restriction of `ObsidianWeb` (or `*`). Deleted pages go to FNS's recycle bin. If FNS refuses a write you will see its error (code 315 means the token isn't allowed to write).
+
+**With git**, each change is a commit in your vault repository (pushing is up to you). Empty folders exist only on disk until a page is added.
+
+**Safety.** Every signed-in user can edit (roles are on the roadmap). Writes only touch `.md` files, refuse odd paths, are limited to 2 MB per note, and refuse requests that come from another website. Not covered yet: uploading images or PDFs, renaming folders, and the Obsidian-mode file tree's folder delete.
+
+> Verified against the mock FNS (`scripts/mock-fns.mjs` with `MOCK_WRITE=1`: create, edit, conflict, overwrite, rename, delete, folders, permission errors) and against a git repository. Try it first on a scratch page in your real vault.
+
 ---
 
 ## Using the UI
@@ -293,10 +310,11 @@ Ideas to revisit, not commitments.
   - Connection data such as tokens must be **stored encrypted**, so it can't be scraped from the Docker data volume.
 - **OIDC role support.** Today every signed-in user has the same access. Admin would be the base level, with custom role names configurable.
   - Set FNS vault access **per connection by role**.
-- **Editing on the hosted site.** Today the server is read-only when it uses FNS.
-  - Create folders and pages.
-  - Modify raw markdown.
-  - Sync changes back to FNS, as long as the token's permissions allow it (the token would need write access to notes and attachments).
+- **Editing on the hosted site.** First version done (see [Editing on the hosted site](#editing-on-the-hosted-site)). Still to do:
+  - Uploading and pasting images and other attachments.
+  - Renaming folders, and folder delete in the Obsidian-mode file tree.
+  - Editing on phones.
+  - Editing permission by role (needs the roles work below).
 
 ### Both modes
 - **Mobile-friendly view.** First version done: phones (under 800px) get the Web layout with a bottom navigation bar, a slide-out page menu, a bottom sheet for outline, backlinks, tags and history, larger touch targets, and grids and tables that stack or scroll. Ideas still open:

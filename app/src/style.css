@@ -345,3 +345,21 @@ button, input, select, textarea { font-family: inherit; }
 .modal label.check { justify-content: flex-start; }
 .font-preview { margin: 0 !important; padding: 10px 12px !important; max-width: none !important; border: 1px solid var(--border); border-radius: 8px; background: var(--bg2); font-size: var(--reading-size, 16px); line-height: var(--reading-lh, 1.6); }
 .reset-font { align-self: flex-start; }
+
+/* editing: nav actions, conflict banner, dialogs */
+.side-actions { display: flex; gap: 6px; padding: 8px 10px 4px; }
+.side-actions button { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.nav-heading { display: flex; align-items: center; }
+.row-del { margin-left: auto; background: none; border: 0; color: var(--muted); padding: 2px 4px; opacity: 0; cursor: pointer; display: inline-flex; }
+.nav-heading:hover .row-del, .row-del:focus { opacity: 1; }
+.row-del:hover { color: #e5484d; }
+button.primary { background: var(--accent); color: #fff; border-color: transparent; display: inline-flex; align-items: center; gap: 6px; }
+button.primary:disabled { opacity: 0.45; }
+button.danger { background: #e5484d; color: #fff; border-color: transparent; }
+.conflict { background: color-mix(in srgb, #e5a50a 16%, var(--bg)); border: 1px solid #e5a50a99; border-radius: 10px; padding: 10px 14px; margin: 10px 16px; }
+.conflict-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.dlg-field { display: flex; flex-direction: column; align-items: stretch !important; gap: 4px; }
+.dlg-field input { width: 100% !important; box-sizing: border-box; }
+.dlg-err { color: #e5484d; }
+.dlg-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.toolbar button { display: inline-flex; align-items: center; gap: 6px; }

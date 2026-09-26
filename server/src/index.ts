@@ -1,10 +1,10 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { AppConfig } from "../../shared/types";
-import { type Backend, GitBackend, safePath } from "./backend";
+import { type Backend, ConflictError, ExistsError, GitBackend, NotEmptyError, NotFoundError, checkNewPath, safePath } from "./backend";
 import { FnsBackend } from "./fns";
 import { setupAuth } from "./auth";
 
@@ -34,6 +34,7 @@ if (SOURCE === "fns") {
     stateFile: path.join(DATA_DIR, "fns-state.json"),
     intervalSec: Number(env.FNS_SYNC_INTERVAL ?? 60),
     client: env.FNS_CLIENT || "ObsidianWeb",
+    canWrite: flag(env.ALLOW_WRITE),
   });
   backend = fns;
 } else {
@@ -94,13 +95,114 @@ app.get("/api/history", async (c) => {
   }
 });
 
+// ---- editing: create / edit / rename / delete (needs ALLOW_WRITE=1; FNS mode also needs a token that may write) ----
+const MAX_NOTE_BYTES = 2 * 1024 * 1024;
+const publicOrigin = env.PUBLIC_URL ? new URL(env.PUBLIC_URL).origin : undefined;
+
+/** Refuse when editing is off or the request comes from another site (cookies alone must not authorise a write). */
+function writeGuard(c: Context): Response | undefined {
+  if (!backend.canWrite) return c.text("editing is disabled on this server", 403);
+  const origin = c.req.header("origin");
+  if (origin) {
+    let ok = origin === publicOrigin;
+    try {
+      ok = ok || new URL(origin).host === c.req.header("host");
+    } catch {
+      ok = false;
+    }
+    if (!ok) return c.text("cross-site request refused", 403);
+  }
+  return undefined;
+}
+
+const who = (c: Context) => {
+  const u = auth.userOf(c);
+  return u?.name || u?.email;
+};
+
+function failed(c: Context, e: unknown): Response {
+  if (e instanceof ConflictError) return c.json({ conflict: true, current: e.current }, 409);
+  if (e instanceof ExistsError) return c.json({ exists: true, error: "already exists" }, 409);
+  if (e instanceof NotEmptyError) return c.json({ notEmpty: true, error: "folder is not empty" }, 409);
+  if (e instanceof NotFoundError) return c.json({ error: "not found" }, 404);
+  const msg = (e as Error)?.message ?? "";
+  if (msg === "bad path" || msg.startsWith("notes must")) return c.json({ error: msg }, 400);
+  console.error("[edit]", msg);
+  return c.json({ error: "the change could not be saved: " + msg.slice(0, 200) }, 502);
+}
+
+async function body<T>(c: Context): Promise<T | undefined> {
+  try {
+    return (await c.req.json()) as T;
+  } catch {
+    return undefined;
+  }
+}
+
 app.put("/api/file", async (c) => {
-  if (!backend.canWrite || !backend.write) return c.text("writes disabled", 403);
-  const { path: p, content, message } = await c.req.json<{ path: string; content: string; message?: string }>();
-  if (!p.endsWith(".md")) return c.text("markdown only", 400);
-  safePath(VAULT, p);
-  await backend.write(p, content, message);
-  return c.text("ok");
+  const denied = writeGuard(c);
+  if (denied) return denied;
+  const b = await body<{ path: string; content: string; message?: string; baseHash?: string; createOnly?: boolean }>(c);
+  if (!b || typeof b.path !== "string" || typeof b.content !== "string") return c.json({ error: "bad request" }, 400);
+  if (Buffer.byteLength(b.content) > MAX_NOTE_BYTES) return c.json({ error: "note is too large (2 MB limit)" }, 413);
+  try {
+    const p = checkNewPath(b.path, "note");
+    await backend.write!(p, b.content, { baseHash: b.baseHash, createOnly: !!b.createOnly, user: who(c), message: b.message });
+    return c.json({ ok: true, path: p });
+  } catch (e) {
+    return failed(c, e);
+  }
+});
+
+app.post("/api/folder", async (c) => {
+  const denied = writeGuard(c);
+  if (denied) return denied;
+  const b = await body<{ path: string }>(c);
+  try {
+    const p = checkNewPath(b?.path ?? "", "folder");
+    await backend.mkdir!(p, who(c));
+    return c.json({ ok: true, path: p });
+  } catch (e) {
+    return failed(c, e);
+  }
+});
+
+app.post("/api/rename", async (c) => {
+  const denied = writeGuard(c);
+  if (denied) return denied;
+  const b = await body<{ from: string; to: string }>(c);
+  try {
+    const from = checkNewPath(b?.from ?? "", "note");
+    const to = checkNewPath(b?.to ?? "", "note");
+    await backend.rename!(from, to, who(c));
+    return c.json({ ok: true, path: to });
+  } catch (e) {
+    return failed(c, e);
+  }
+});
+
+app.delete("/api/file", async (c) => {
+  const denied = writeGuard(c);
+  if (denied) return denied;
+  try {
+    const p = checkNewPath(c.req.query("path") ?? "", "note");
+    await backend.remove!(p, who(c));
+    return c.json({ ok: true });
+  } catch (e) {
+    return failed(c, e);
+  }
+});
+
+app.delete("/api/folder", async (c) => {
+  const denied = writeGuard(c);
+  if (denied) return denied;
+  try {
+    const p = checkNewPath(c.req.query("path") ?? "", "folder");
+    await backend.removeDir!(p, who(c));
+    return c.json({ ok: true });
+  } catch (e) {
+    return failed(c, e);
+  }
 });
 
 const MIME: Record<string, string> = {

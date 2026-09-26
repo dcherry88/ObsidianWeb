@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "preact/hooks";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { diffLines } from "diff";
 import type { AppConfig, Commit, VaultProvider } from "../../shared/types";
-import { loadProvider, syncNow } from "./providers";
+import { ConflictError, ExistsError, NotEmptyError, loadProvider, syncNow } from "./providers";
+import { textHash } from "../../shared/hash";
 import { outline, renderMarkdown, slug, splitFrontmatter, type RenderCtx } from "./md";
 import { Editor } from "./Editor";
 import { NavMenu, Tree } from "./Tree";
@@ -45,6 +46,9 @@ function RibbonBtn(p: { icon: string; label: string; tip: string; on?: boolean; 
   );
 }
 
+/** Preact ignores the autofocus attribute on elements added after page load, so focus explicitly on mount. */
+const focusOnMount = (el: HTMLInputElement | null) => el?.focus();
+const focusAndSelect = (el: HTMLInputElement | null) => (el?.focus(), el?.select());
 const MOBILE_Q = "(max-width: 800px)";
 function useMobile() {
   const [m, setM] = useState(() => typeof matchMedia !== "undefined" && matchMedia(MOBILE_Q).matches);
@@ -63,6 +67,8 @@ export function App() {
   const files = useMemo(() => allFiles.filter((f) => f.endsWith(".md")), [allFiles]);
   // notes and PDFs are browsable pages; other attachments are only referenced from notes
   const navFiles = useMemo(() => allFiles.filter((f) => f.endsWith(".md") || isPdf(f)), [allFiles]);
+  // same, plus empty folders ("folder/" entries) so the navigation can show and delete them
+  const navEntries = useMemo(() => allFiles.filter((f) => f.endsWith(".md") || isPdf(f) || f.endsWith("/")), [allFiles]);
   const [theme, setTheme] = useState<string>(store.get("theme", "system"));
   const [accent, setAccent] = useState<string>(store.get("accent", ""));
   const [showSettings, setShowSettings] = useState(false);
@@ -98,6 +104,20 @@ export function App() {
   const [oldContent, setOldContent] = useState("");
   const [status, setStatus] = useState("");
   const [split, setSplit] = useState<string | null>(null);
+  // editing
+  const [conflict, setConflict] = useState<string | null>(null); // what is stored now, when a save found the note changed elsewhere
+  const [showDiff, setShowDiff] = useState(false);
+  const [editorKey, setEditorKey] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const [loadedFor, setLoadedFor] = useState(""); // the page whose text is in `content` (the editor waits for this)
+  type Dlg = { kind: "newPage" | "newFolder" | "rename" | "delete" | "deleteFolder"; folder?: string; name?: string; value?: string; target?: string };
+  const [dlg, setDlg] = useState<Dlg | null>(null);
+  const [dlgBusy, setDlgBusy] = useState(false);
+  const [dlgErr, setDlgErr] = useState("");
+  const currentRef = useRef("");
+  const dirtyRef = useRef(false);
+  const skipHash = useRef(false);
+  const startEdit = useRef<string | null>(null);
   const [splitContent, setSplitContent] = useState("");
 
   useEffect(() => {
@@ -113,26 +133,57 @@ export function App() {
         }
       })
       .catch((e) => setErr(String(e)));
-    const onHash = () => setCurrent(pathFromHash());
+    const onHash = () => {
+      if (skipHash.current) {
+        skipHash.current = false;
+        return;
+      }
+      const next = pathFromHash();
+      if (dirtyRef.current && next !== currentRef.current && !confirm("You have unsaved changes to this note. Leave without saving?")) {
+        skipHash.current = true; // put the address back without reloading
+        location.hash = "#/" + currentRef.current.split("/").map(encodeURIComponent).join("/");
+        return;
+      }
+      setCurrent(next);
+    };
+    const beforeUnload = (e: BeforeUnloadEvent) => {
+      if (dirtyRef.current) e.preventDefault();
+    };
     addEventListener("hashchange", onHash);
-    return () => removeEventListener("hashchange", onHash);
+    addEventListener("beforeunload", beforeUnload);
+    return () => {
+      removeEventListener("hashchange", onHash);
+      removeEventListener("beforeunload", beforeUnload);
+    };
   }, []);
 
   const provider = boot?.provider;
+  const canEdit = !!provider?.canWrite && !mobile;
+  currentRef.current = current;
 
   // load file + history when path changes
   useEffect(() => {
     if (!provider || !current) return;
     setSelected(null);
     setDraft(null);
-    setMode("preview");
+    setConflict(null);
+    setMode(startEdit.current === current ? "edit" : "preview");
+    if (startEdit.current === current) startEdit.current = null;
     if (isPdf(current)) {
       setContent("");
+      setLoadedFor(current);
       setCommits([]);
       return;
     }
-    provider.read(current).then(setContent).catch((e) => setContent(`*Could not load: ${e}*`));
-    provider.history(current).then(setCommits).catch(() => setCommits([]));
+    let alive = true;
+    provider
+      .read(current)
+      .then((c) => alive && (setContent(c), setLoadedFor(current)))
+      .catch((e) => alive && (setContent(`*Could not load: ${e}*`), setLoadedFor(current)));
+    provider.history(current).then((h) => alive && setCommits(h)).catch(() => alive && setCommits([]));
+    return () => {
+      alive = false;
+    };
   }, [provider, current]);
 
   useEffect(() => setOpenNav(ancestorsOf(current)), [current]);
@@ -265,18 +316,131 @@ export function App() {
   };
 
   const dirty = draft !== null && draft !== content;
-  const save = async () => {
-    if (!provider || !dirty) return;
+  dirtyRef.current = dirty && mode === "edit";
+  const enc = (p: string) => p.split("/").map(encodeURIComponent).join("/");
+  const refreshTree = async () => {
+    if (provider) setFiles(await provider.tree());
+  };
+
+  const save = async (baseText?: string) => {
+    if (!provider || !dirty || saving) return;
+    setSaving(true);
     try {
-      await provider.write(current, draft!);
+      await provider.write(current, draft!, { baseHash: textHash(baseText ?? content) });
       setContent(draft!);
       updateText(current, draft!);
       setDraft(null);
-      setStatus("Saved & committed");
-      provider.history(current).then(setCommits);
+      setConflict(null);
+      setShowDiff(false);
+      setStatus("Saved");
+      provider.history(current).then(setCommits).catch(() => {});
     } catch (e) {
-      setStatus(String(e));
+      if (e instanceof ConflictError) {
+        setConflict(e.current);
+        setStatus("Not saved: the note changed elsewhere");
+      } else setStatus("Not saved: " + String((e as Error).message ?? e));
+    } finally {
+      setSaving(false);
     }
+  };
+  const discard = () => {
+    if (dirty && !confirm("Discard your unsaved changes?")) return;
+    setDraft(null);
+    setConflict(null);
+    setEditorKey((k) => k + 1);
+    setMode("preview");
+  };
+  const loadTheirs = () => {
+    setContent(conflict ?? "");
+    setDraft(null);
+    setConflict(null);
+    setShowDiff(false);
+    setEditorKey((k) => k + 1);
+  };
+  const copyMine = () => navigator.clipboard?.writeText(draft ?? content).then(() => setStatus("Your text was copied"), () => setStatus("Could not copy"));
+
+  // folders that exist (from files and empty-folder entries) for the "new page" dialog
+  const folders = useMemo(() => {
+    const set = new Set<string>();
+    for (const f of allFiles) {
+      const parts = f.replace(/\/$/, "").split("/");
+      if (!f.endsWith("/")) parts.pop();
+      parts.forEach((_, i) => set.add(parts.slice(0, i + 1).join("/")));
+    }
+    return [...set].sort((x, y) => x.localeCompare(y));
+  }, [allFiles]);
+
+  const openDlg = (d: Dlg) => (setDlgErr(""), setDlgBusy(false), setDlg(d));
+  const runDlg = async (fn: () => Promise<void>) => {
+    setDlgBusy(true);
+    setDlgErr("");
+    try {
+      await fn();
+      setDlg(null);
+    } catch (e) {
+      setDlgErr(e instanceof ExistsError || e instanceof NotEmptyError ? e.message : String((e as Error).message ?? e));
+    } finally {
+      setDlgBusy(false);
+    }
+  };
+  const mdName = (n: string) => (n.toLowerCase().endsWith(".md") ? n : n + ".md");
+  const submitDlg = () => {
+    if (!dlg || !provider) return;
+    if (dlg.kind === "newPage")
+      return runDlg(async () => {
+        const name = (dlg.name ?? "").trim();
+        if (!name || /[\/\\]/.test(name) || name.startsWith(".")) throw new Error("Enter a page name without slashes.");
+        const folder = (dlg.folder ?? "").trim().replace(/^\/+|\/+$/g, "");
+        const path = [folder, mdName(name)].filter(Boolean).join("/");
+        await provider.write(path, `# ${name.replace(/\.md$/i, "")}\n\n`, { createOnly: true });
+        await refreshTree();
+        startEdit.current = path;
+        go(path);
+      });
+    if (dlg.kind === "newFolder")
+      return runDlg(async () => {
+        const path = (dlg.value ?? "").trim().replace(/^\/+|\/+$/g, "");
+        if (!path) throw new Error("Enter a folder name.");
+        await provider.mkdir!(path);
+        await refreshTree();
+        const parts = path.split("/");
+        setOpenNav((o) => new Set([...o, ...parts.map((_, i) => parts.slice(0, i + 1).join("/"))]));
+      });
+    if (dlg.kind === "rename")
+      return runDlg(async () => {
+        const to = mdName((dlg.value ?? "").trim().replace(/^\/+/, ""));
+        if (!to || to === current) throw new Error("Enter a different path.");
+        await provider.rename!(current, to);
+        await refreshTree();
+        setTabs((t) => {
+          const n = t.map((x) => (x === current ? to : x));
+          store.set("tabs", n);
+          return n;
+        });
+        dirtyRef.current = false;
+        go(to);
+      });
+    if (dlg.kind === "delete")
+      return runDlg(async () => {
+        const gone = current;
+        await provider.remove!(gone);
+        await refreshTree();
+        setTabs((t) => {
+          const n = t.filter((x) => x !== gone);
+          store.set("tabs", n);
+          return n;
+        });
+        dirtyRef.current = false;
+        setDraft(null);
+        const next = ["index.md", "README.md", "Home.md", "Welcome.md"].find((h) => h !== gone && files.includes(h)) ?? files.find((f) => f !== gone);
+        if (next) go(next);
+        else location.hash = "";
+      });
+    if (dlg.kind === "deleteFolder")
+      return runDlg(async () => {
+        await provider.removeDir!(dlg.target!);
+        await refreshTree();
+      });
   };
 
   const shown = navFiles.filter((f) => f.toLowerCase().includes(search.toLowerCase()));
@@ -442,11 +606,21 @@ export function App() {
           {layout === "vault" && sideView === "nav" && (
             <input class="search" placeholder="Search files…" value={search} onInput={(e) => setSearch((e.target as HTMLInputElement).value)} />
           )}
+          {canEdit && (
+            <div class="side-actions">
+              <button title="Create a new page" onClick={() => openDlg({ kind: "newPage", folder: current.includes("/") ? current.slice(0, current.lastIndexOf("/")) : "", name: "" })}>
+                <Icon name="file-plus" size={16} /> Page
+              </button>
+              <button title="Create a new folder" onClick={() => openDlg({ kind: "newFolder", value: "" })}>
+                <Icon name="folder-plus" size={16} /> Folder
+              </button>
+            </div>
+          )}
           <div class="scroll">
             {layout === "doc" ? (
-              <NavMenu files={navFiles} open={openNav} toggle={toggleNav} current={current} onOpen={go} />
+              <NavMenu files={navEntries} open={openNav} toggle={toggleNav} current={current} onOpen={go} onDeleteFolder={canEdit ? (p) => openDlg({ kind: "deleteFolder", target: p }) : undefined} />
             ) : sideView === "tree" ? (
-              <Tree files={navFiles} open={open} toggle={toggle} current={current} onOpen={go} />
+              <Tree files={navEntries} open={open} toggle={toggle} current={current} onOpen={go} />
             ) : (
               shown.map((f) => (
                 <div class={"row file nav" + (f === current ? " active" : "")} onClick={() => go(f)}>
@@ -481,7 +655,12 @@ export function App() {
                 <>
               {status && <span class="status">{status}</span>}
               {mode === "edit" && boot.provider.canWrite && (
-                <button disabled={!dirty} title="Save and commit this note (Ctrl/Cmd+S)" onClick={save}>Save</button>
+                <>
+                  <button class="primary" disabled={!dirty || saving} title="Save this note (Ctrl/Cmd+S)" onClick={() => save()}>
+                    <Icon name="save" size={15} /> {saving ? "Saving…" : "Save"}
+                  </button>
+                  <button title="Throw away unsaved changes and stop editing" onClick={discard}>Discard</button>
+                </>
               )}
               <button class={mode === "raw" ? "on" : ""} title="Toggle between the rendered page and the raw markdown source" onClick={() => (setStatus(""), setMode(mode === "raw" ? "preview" : "raw"))}>
                 {mode === "raw" ? "Rendered" : "Show raw"}
@@ -491,7 +670,7 @@ export function App() {
                   {split ? "Close split" : "Split"}
                 </button>
               )}
-              {layout === "vault" && (
+              {(layout === "vault" || canEdit) && (
                 <button
                   title="Edit this note in a markdown editor with live preview"
                   onClick={() => {
@@ -500,8 +679,14 @@ export function App() {
                     setStatus(mode !== "edit" && !boot.provider.canWrite ? "Read-only in this mode (edits not saved)" : "");
                   }}
                 >
-                  {mode === "edit" ? "Preview" : "Edit"}
+                  {mode === "edit" ? "Preview" : <><Icon name="edit" size={15} /> Edit</>}
                 </button>
+              )}
+              {canEdit && !selected && (
+                <>
+                  <button title="Rename or move this page" aria-label="Rename" onClick={() => openDlg({ kind: "rename", value: current })}><Icon name="rename" size={15} /></button>
+                  <button title="Delete this page" aria-label="Delete" onClick={() => openDlg({ kind: "delete" })}><Icon name="trash" size={15} /></button>
+                </>
               )}
                 </>
               )}
@@ -513,13 +698,35 @@ export function App() {
                   Viewing {selected.sha.slice(0, 7)} ({new Date(selected.date).toLocaleString()}) · <a onClick={() => setSelected(null)}>back to current</a>
                 </div>
               )}
+              {conflict !== null && (
+                <div class="conflict">
+                  <b>This note changed elsewhere while you were editing it.</b> Nothing was saved.
+                  <div class="conflict-actions">
+                    <button onClick={() => setShowDiff(!showDiff)}>{showDiff ? "Hide differences" : "Show differences"}</button>
+                    <button class="primary" title="Save your version over the one that is stored now" onClick={() => save(conflict)}>Overwrite with my version</button>
+                    <button title="Discard your edits and load the stored version" onClick={loadTheirs}>Load their version</button>
+                    <button onClick={copyMine}>Copy my text</button>
+                    <button onClick={() => setConflict(null)}>Keep editing</button>
+                  </div>
+                  {showDiff && (
+                    <div class="diff">
+                      <div class="muted pad small">Stored version → your version</div>
+                      {diffLines(conflict, draft ?? content).map((p) => (
+                        <pre class={p.added ? "add" : p.removed ? "del" : "same"}>{p.value}</pre>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
               {isPdf(current) ? (
                 <iframe class="pdf-page" src={boot.provider.assetUrl(current)} title={current} />
               ) : mode === "raw" ? (
                 <pre class="raw">{shownRaw}</pre>
+              ) : mode === "edit" && !selected && loadedFor !== current ? (
+                <div class="center muted">Loading…</div>
               ) : mode === "edit" && !selected ? (
                 <div class="edit-split">
-                  <Editor key={current} value={text} onChange={setDraft} onSave={save} />
+                  <Editor key={current + ":" + editorKey} value={text} onChange={setDraft} onSave={() => save()} />
                   <article class="md live" dangerouslySetInnerHTML={{ __html: html }} />
                 </div>
               ) : (
@@ -623,6 +830,50 @@ export function App() {
         </aside>
       )}
     </div>
+    {dlg && (
+      <div class="overlay" onClick={() => !dlgBusy && setDlg(null)}>
+        <form class="modal" onClick={(e) => e.stopPropagation()} onSubmit={(e) => (e.preventDefault(), submitDlg())}>
+          <div class="modal-head">
+            <b>
+              {dlg.kind === "newPage" ? "New page" : dlg.kind === "newFolder" ? "New folder" : dlg.kind === "rename" ? "Rename or move page" : dlg.kind === "delete" ? "Delete page" : "Delete folder"}
+            </b>
+          </div>
+          {dlg.kind === "newPage" && (
+            <>
+              <label class="dlg-field">Folder (leave empty for the top level; new folders are created)
+                <input type="text" list="folder-list" value={dlg.folder ?? ""} onInput={(e) => setDlg({ ...dlg, folder: (e.target as HTMLInputElement).value })} />
+                <datalist id="folder-list">{folders.map((f) => <option value={f} />)}</datalist>
+              </label>
+              <label class="dlg-field">Page name
+                <input type="text" ref={focusOnMount} placeholder="My new page" value={dlg.name ?? ""} onInput={(e) => setDlg({ ...dlg, name: (e.target as HTMLInputElement).value })} />
+              </label>
+              <div class="muted small">Creates <code>{[(dlg.folder ?? "").trim().replace(/^\/+|\/+$/g, ""), mdName((dlg.name ?? "").trim() || "…")].filter(Boolean).join("/")}</code> and opens it for editing.</div>
+            </>
+          )}
+          {dlg.kind === "newFolder" && (
+            <label class="dlg-field">Folder path (use / for nested folders)
+              <input type="text" ref={focusOnMount} placeholder="Projects/New folder" value={dlg.value ?? ""} onInput={(e) => setDlg({ ...dlg, value: (e.target as HTMLInputElement).value })} />
+            </label>
+          )}
+          {dlg.kind === "rename" && (
+            <label class="dlg-field">New path (change the folder to move the page)
+              <input type="text" ref={focusAndSelect} value={dlg.value ?? ""} onInput={(e) => setDlg({ ...dlg, value: (e.target as HTMLInputElement).value })} />
+            </label>
+          )}
+          {dlg.kind === "delete" && (
+            <div>Delete <b>{current}</b>? It can be recovered from the version history or the recycle bin of your sync service, but links to it will break.</div>
+          )}
+          {dlg.kind === "deleteFolder" && <div>Delete the empty folder <b>{dlg.target}</b>?</div>}
+          {dlgErr && <div class="dlg-err">{dlgErr}</div>}
+          <div class="dlg-actions">
+            <button type="button" disabled={dlgBusy} onClick={() => setDlg(null)}>Cancel</button>
+            <button type="submit" class={dlg.kind === "delete" || dlg.kind === "deleteFolder" ? "danger" : "primary"} disabled={dlgBusy}>
+              {dlgBusy ? "Working…" : dlg.kind === "newPage" || dlg.kind === "newFolder" ? "Create" : dlg.kind === "rename" ? "Rename" : "Delete"}
+            </button>
+          </div>
+        </form>
+      </div>
+    )}
     {mobile && searchOpen && (
       <div class="search-sheet">
         <Search notes={navFiles} indexTotal={files.length} texts={texts} noteTags={index.noteTags} allTags={allTags} onOpen={go} autoFocus onClose={() => setSearchOpen(false)} />

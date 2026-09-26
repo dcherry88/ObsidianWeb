@@ -1,10 +1,11 @@
 // Fast Note Sync service (https://github.com/haierkeys/fast-note-sync-service) as the vault source.
 // A background job mirrors the vault from the service's REST API into a local folder, so the rest of the
 // server serves plain files. Note history is proxied live from the service. Read-only.
-import { mkdir, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename as fsRename, rm, stat, utimes, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Commit } from "../../shared/types";
-import { type Backend, safePath, walk } from "./backend";
+import { textHash } from "../../shared/hash";
+import { type Backend, ConflictError, ExistsError, NotEmptyError, NotFoundError, type WriteOpts, safePath, walk } from "./backend";
 
 export interface FnsOptions {
   url: string;
@@ -15,6 +16,8 @@ export interface FnsOptions {
   intervalSec: number;
   /** client name sent as X-Client; must match the token's client restriction */
   client: string;
+  /** allow the editing operations (the token must also permit note writes) */
+  canWrite?: boolean;
 }
 
 export interface SyncStatus {
@@ -43,17 +46,21 @@ export class FnsBackend implements Backend {
   status: SyncStatus = { running: false, notes: 0, files: 0, changed: 0 };
   private timer?: NodeJS.Timeout;
 
-  constructor(private o: FnsOptions) {}
+  constructor(private o: FnsOptions) {
+    this.canWrite = !!o.canWrite;
+  }
 
   // ---------- HTTP ----------
   // FNS wants "Authorization: Bearer <token>" and identifies the caller by X-Client, which must match the
   // token's "Client restriction" (or the restriction must be "*").
-  private headers() {
+  private headers(user?: string, json = false) {
+    const name = user ? `${this.o.client} (${user})` : this.o.client;
     return {
       Authorization: `Bearer ${this.o.token}`,
       "X-Client": this.o.client,
-      "X-Client-Name": this.o.client,
+      "X-Client-Name": encodeURIComponent(name),
       "X-Client-Version": "1.0",
+      ...(json ? { "Content-Type": "application/json" } : {}),
     };
   }
 
@@ -63,13 +70,19 @@ export class FnsBackend implements Backend {
     return fetch(u, { headers: this.headers() });
   }
 
-  private async api<T>(p: string, query: Record<string, string | number | boolean | undefined>): Promise<T> {
-    const res = await this.fetchRaw(p, query);
+  private async api<T>(p: string, query: Record<string, string | number | boolean | undefined>, init?: { method: string; body?: unknown; user?: string }): Promise<T> {
+    const u = new URL(this.o.url.replace(/\/$/, "") + p);
+    for (const [k, v] of Object.entries(query)) if (v !== undefined) u.searchParams.set(k, String(v));
+    const res = await fetch(u, {
+      method: init?.method ?? "GET",
+      headers: this.headers(init?.user, init?.body !== undefined),
+      body: init?.body !== undefined ? JSON.stringify(init.body) : undefined,
+    });
     if (!res.ok) throw new Error(`${p}: HTTP ${res.status}`);
     const j = (await res.json()) as { code?: number; status?: boolean; message?: string; data?: T };
     if (j.status === false || (typeof j.code === "number" && j.code <= 0)) {
-      const hint = j.code === 315 || j.code === 314 || /scope|client/i.test(j.message ?? "") ? ` (check the FNS token: it needs the REST protocol, read access to notes and attachments, this vault, and a Client restriction equal to "${this.o.client}" or "*")` : "";
-      throw new Error(`${p}: ${j.message ?? "error"} (code ${j.code})${hint}`);
+      const hint = j.code === 315 || j.code === 314 || /scope|client/i.test(j.message ?? "") ? ` (check the FNS token: it needs the REST protocol, read access${this.canWrite ? " and write access" : ""} to notes and attachments, this vault, and a Client restriction equal to "${this.o.client}" or "*")` : "";
+      throw Object.assign(new Error(`${p}: ${j.message ?? "error"} (code ${j.code})${hint}`), { fnsCode: j.code });
     }
     return j.data as T;
   }
@@ -188,7 +201,7 @@ export class FnsBackend implements Backend {
   }
 
   // ---------- Backend ----------
-  tree = () => walk(this.o.mirrorDir).then((f) => f.sort((a, b) => a.localeCompare(b)));
+  tree = () => walk(this.o.mirrorDir, "", true).then((f) => f.sort((a, b) => a.localeCompare(b)));
   read = (rel: string) => readFile(safePath(this.o.mirrorDir, rel));
 
   async history(rel: string): Promise<Commit[]> {
@@ -208,5 +221,87 @@ export class FnsBackend implements Backend {
     safePath(this.o.mirrorDir, rel);
     const h = await this.api<{ content?: string }>("/api/note/history", { id: ref });
     return h?.content ?? "";
+  }
+
+  // ---------- editing (only when canWrite) ----------
+  private async settled() {
+    await this.inflight?.catch(() => {}); // don't race a running sync
+  }
+
+  private async setState(mut: (st: Record<string, string>) => void) {
+    const st = await this.loadState();
+    mut(st);
+    await mkdir(path.dirname(this.o.stateFile), { recursive: true });
+    await writeFile(this.o.stateFile, JSON.stringify(st));
+  }
+
+  private async liveNote(rel: string): Promise<string | undefined> {
+    try {
+      const d = await this.api<{ content?: string }>("/api/note", { vault: this.o.vault, path: rel });
+      return d?.content ?? "";
+    } catch (e) {
+      if ((e as { fnsCode?: number }).fnsCode === 428) return undefined; // note does not exist
+      throw e;
+    }
+  }
+
+  async write(rel: string, content: string, o: WriteOpts = {}) {
+    if (!this.canWrite) throw new Error("writes disabled");
+    const abs = safePath(this.o.mirrorDir, rel);
+    await this.settled();
+    const live = await this.liveNote(rel); // ask FNS itself, not our copy, so a change made a second ago is caught
+    if (o.createOnly && live !== undefined) throw new ExistsError();
+    if (o.baseHash !== undefined && live !== undefined && textHash(live) !== o.baseHash) throw new ConflictError(live);
+    const saved = await this.api<{ contentHash?: string }>(
+      "/api/note",
+      {},
+      { method: "POST", user: o.user, body: { vault: this.o.vault, path: rel, content, mtime: Date.now(), ...(o.createOnly ? { createOnly: true } : {}) } },
+    );
+    await mkdir(path.dirname(abs), { recursive: true });
+    await writeFile(abs, content, "utf8");
+    if (saved?.contentHash) await this.setState((st) => void (st[`n:${rel}`] = String(saved.contentHash)));
+  }
+
+  async mkdir(rel: string, user?: string) {
+    if (!this.canWrite) throw new Error("writes disabled");
+    const abs = safePath(this.o.mirrorDir, rel);
+    await this.api("/api/folder", {}, { method: "POST", user, body: { vault: this.o.vault, path: rel } });
+    await mkdir(abs, { recursive: true });
+  }
+
+  async rename(from: string, to: string, user?: string) {
+    if (!this.canWrite) throw new Error("writes disabled");
+    const src = safePath(this.o.mirrorDir, from);
+    const dst = safePath(this.o.mirrorDir, to);
+    await this.settled();
+    if ((await this.liveNote(from)) === undefined) throw new NotFoundError();
+    if ((await this.liveNote(to)) !== undefined) throw new ExistsError();
+    await this.api("/api/note/rename", {}, { method: "POST", user, body: { vault: this.o.vault, oldPath: from, path: to } });
+    await mkdir(path.dirname(dst), { recursive: true });
+    await fsRename(src, dst).catch(() => {});
+    await this.setState((st) => {
+      if (`n:${from}` in st) {
+        st[`n:${to}`] = st[`n:${from}`];
+        delete st[`n:${from}`];
+      }
+    });
+  }
+
+  async remove(rel: string, user?: string) {
+    if (!this.canWrite) throw new Error("writes disabled");
+    const abs = safePath(this.o.mirrorDir, rel);
+    await this.settled();
+    if ((await this.liveNote(rel)) === undefined) throw new NotFoundError();
+    await this.api("/api/note", { vault: this.o.vault, path: rel }, { method: "DELETE", user }); // FNS keeps deleted notes in its recycle bin
+    await rm(abs, { force: true });
+    await this.setState((st) => void delete st[`n:${rel}`]);
+  }
+
+  async removeDir(rel: string, user?: string) {
+    if (!this.canWrite) throw new Error("writes disabled");
+    const abs = safePath(this.o.mirrorDir, rel);
+    if ((await readdir(abs).catch(() => ["x"])).length) throw new NotEmptyError();
+    await this.api("/api/folder", {}, { method: "DELETE", user, body: { vault: this.o.vault, path: rel } });
+    await rm(abs, { recursive: true, force: true });
   }
 }

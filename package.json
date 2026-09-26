@@ -1,0 +1,17 @@
+{
+  "name": "obsidian-web",
+  "private": true,
+  "type": "module",
+  "workspaces": ["app", "server"],
+  "scripts": {
+    "dev:app": "npm run dev -w app",
+    "dev:server": "ALLOW_WRITE=1 npm run dev -w server",
+    "build": "npm run build -w app",
+    "build:static": "npm run build -w app && node scripts/build-static.mjs",
+    "start": "npm run start -w server",
+    "typecheck": "tsc -p app --noEmit && tsc -p server --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}

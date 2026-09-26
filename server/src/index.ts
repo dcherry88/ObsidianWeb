@@ -11,9 +11,11 @@ import { setupAuth } from "./auth";
 const env = process.env;
 const flag = (v?: string) => ["1", "true", "yes"].includes((v ?? "").toLowerCase());
 
+// Defaults are relative to the repo root, not the working directory (npm runs workspaces from server/).
+const ROOT = path.resolve(import.meta.dirname, "../..");
 const PORT = Number(env.PORT ?? 8787);
-const APP_DIST = path.resolve(env.APP_DIST ?? "./app/dist");
-const DATA_DIR = path.resolve(env.DATA_DIR ?? "./data");
+const APP_DIST = path.resolve(ROOT, env.APP_DIST ?? "app/dist");
+const DATA_DIR = path.resolve(ROOT, env.DATA_DIR ?? "data");
 const SOURCE = (env.VAULT_SOURCE ?? "git").toLowerCase();
 
 // ---- vault backend: local git repo (default) or a Fast Note Sync service mirrored to disk ----
@@ -35,7 +37,7 @@ if (SOURCE === "fns") {
   });
   backend = fns;
 } else {
-  VAULT = path.resolve(env.VAULT_PATH ?? "./vault");
+  VAULT = path.resolve(ROOT, env.VAULT_PATH ?? "vault");
   backend = new GitBackend(VAULT, flag(env.ALLOW_WRITE));
 }
 

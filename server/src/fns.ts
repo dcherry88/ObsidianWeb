@@ -74,7 +74,10 @@ export class FnsBackend implements Backend {
     const res = await this.fetchRaw(p, query);
     if (!res.ok) throw new Error(`${p}: HTTP ${res.status}`);
     const j = (await res.json()) as { code?: number; status?: boolean; message?: string; data?: T };
-    if (j.status === false || (typeof j.code === "number" && j.code <= 0)) throw new Error(`${p}: ${j.message ?? "error"} (code ${j.code})`);
+    if (j.status === false || (typeof j.code === "number" && j.code <= 0)) {
+      const hint = j.code === 315 || /scope/i.test(j.message ?? "") ? " (this token is not allowed to use the REST API; it needs a token with the \"rest\" scope)" : "";
+      throw new Error(`${p}: ${j.message ?? "error"} (code ${j.code})${hint}`);
+    }
     return j.data as T;
   }
 

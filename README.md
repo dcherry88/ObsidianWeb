@@ -268,7 +268,7 @@ Komodo variables work too: put the client ID or secret in Komodo Variables and r
 - **Phones (under 800px wide)**: always the Web layout, with a bottom bar (Pages, Search, Home, Contents, More), a slide-out page menu, and a bottom sheet for outline, backlinks, tags and history. Sync now, Settings and Sign out are under **More**.
 - **Split** (Obsidian mode): open a second note beside the current one, or use the ⧉ icon on a tab.
 - **Edit** (Obsidian mode, server with `ALLOW_WRITE=1`): editor with live preview; `Ctrl/Cmd+S` saves and commits. In static mode the editor is view-only and nothing is saved.
-- **Settings** (⚙): theme, accent color, default view. Stored in the browser only.
+- **Settings**: theme, accent color, default view, and reading options for readability: text font (system, serif, humanist, high-legibility, dyslexia-friendly, monospace, or any font installed on your device by name), text size, line spacing, letter spacing, text width, code font, and an optional "use this font for menus too" switch. A live preview shows the result. Only fonts already installed on the device are used, nothing is downloaded. Stored in the browser only.
 
 ## Troubleshooting
 | Symptom | Likely cause |

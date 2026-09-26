@@ -43,7 +43,8 @@ a { color: var(--accent); cursor: pointer; }
 .banner { background: var(--bg3); padding: 6px 16px; }
 
 .doc { padding: 0; }
-.md { max-width: 760px; margin: 0 auto; padding: 20px 24px 80px; }
+.md { max-width: var(--reading-w, 760px); margin: 0 auto; padding: 20px 24px 80px; font-family: var(--font-body, inherit); letter-spacing: var(--reading-ls, normal); }
+.obs .md { font-size: var(--reading-size, inherit); line-height: var(--reading-lh, 1.5); }
 .md h1, .md h2, .md h3 { line-height: 1.25; }
 .md pre { background: var(--bg2); padding: 10px 12px; border-radius: 6px; overflow: auto; }
 .md code { background: var(--bg2); padding: 1px 4px; border-radius: 3px; }
@@ -61,7 +62,7 @@ pre.fm { font-size: 12px; color: var(--muted); border: 1px solid var(--border); 
 
 .editor { height: 100%; } .editor .cm-editor { height: 100%; background: var(--bg); color: var(--fg); }
 .editor .cm-gutters { background: var(--bg2); color: var(--muted); border: 0; }
-.editor .cm-content { caret-color: var(--fg); font-family: ui-monospace, Menlo, monospace; }
+.editor .cm-content { caret-color: var(--fg); font-family: var(--font-code, ui-monospace, Menlo, monospace); }
 .editor .cm-cursor { border-left-color: var(--fg); }
 .editor .cm-activeLine { background: var(--bg2); }
 
@@ -142,7 +143,9 @@ pre.fm { font-size: 12px; color: var(--muted); border: 1px solid var(--border); 
 /* ===== Web mode: a cleaner, more modern docs-site look (Obsidian mode keeps the styles above) ===== */
 .tb-btn { background: transparent; border: 1px solid transparent; }
 .tb-btn:hover { background: var(--bg3); }
-.app.web { font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 15px; }
+.app.web { font-family: var(--font-ui, Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif); font-size: 15px; }
+.app.obs { font-family: var(--font-ui, inherit); }
+button, input, select, textarea { font-family: inherit; }
 .app.web .topbar { background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); padding: 10px 20px; gap: 12px; }
 .app.web .brand { font-size: 17px; font-weight: 700; letter-spacing: -0.02em; }
 .app.web .brand::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 3px; background: var(--accent); margin-right: 8px; }
@@ -165,7 +168,7 @@ pre.fm { font-size: 12px; color: var(--muted); border: 1px solid var(--border); 
 .app.web .crumb { font-size: 13px; color: var(--muted); }
 .app.web .toolbar button, .app.web .split-head button { border-radius: 999px; background: var(--bg2); border-color: transparent; padding: 4px 14px; }
 .app.web .toolbar button.on { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
-.app.web .md { max-width: 780px; padding: 12px 32px 96px; line-height: 1.75; font-size: 16px; }
+.app.web .md { max-width: var(--reading-w, 780px); padding: 12px 32px 96px; line-height: var(--reading-lh, 1.75); font-size: var(--reading-size, 16px); }
 .app.web .md h1 { font-size: 2.3rem; font-weight: 800; letter-spacing: -0.03em; margin: 0.6em 0 0.4em; }
 .app.web .md h2 { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.02em; margin-top: 2em; padding-bottom: 0.3em; border-bottom: 1px solid var(--border); }
 .app.web .md h3 { font-size: 1.15rem; font-weight: 650; margin-top: 1.6em; }
@@ -269,7 +272,7 @@ pre.fm { font-size: 12px; color: var(--muted); border: 1px solid var(--border); 
 
   .app.web .toolbar { padding: 8px 14px 0; gap: 6px; }
   .crumb { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
-  .app.web .md, .md { padding: 8px 16px 96px; font-size: 16px; line-height: 1.7; max-width: none; }
+  .app.web .md, .md { padding: 8px 16px 96px; font-size: var(--reading-size, 16px); line-height: var(--reading-lh, 1.7); max-width: none; }
   .app.web .md h1 { font-size: 1.75rem; }
   .md table { display: block; overflow-x: auto; max-width: 100%; }
   .md .vsections table { display: table; }
@@ -329,3 +332,16 @@ pre.fm { font-size: 12px; color: var(--muted); border: 1px solid var(--border); 
 .drawer-head button { display: inline-flex; align-items: center; justify-content: center; }
 .tab .x .icon { vertical-align: -2px; }
 .icon-more path { stroke-width: 3.4; }
+
+/* code and raw text follow the code font setting */
+.md code, .md pre, .md pre code, .raw, .fm, .cm-content { font-family: var(--font-code, ui-monospace, "SF Mono", Menlo, Consolas, monospace); }
+.md h1, .md h2, .md h3, .md h4 { font-family: var(--font-body, inherit); }
+
+/* settings: reading section */
+.settings-group { margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--border); font-weight: 600; }
+.modal { max-height: 90vh; overflow: auto; }
+.modal input[type="text"] { background: var(--bg3); color: var(--fg); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; width: 200px; }
+.modal input[type="range"] { width: 200px; accent-color: var(--accent); }
+.modal label.check { justify-content: flex-start; }
+.font-preview { margin: 0 !important; padding: 10px 12px !important; max-width: none !important; border: 1px solid var(--border); border-radius: 8px; background: var(--bg2); font-size: var(--reading-size, 16px); line-height: var(--reading-lh, 1.6); }
+.reset-font { align-self: flex-start; }

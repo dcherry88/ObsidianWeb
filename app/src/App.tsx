@@ -7,6 +7,7 @@ import { Editor } from "./Editor";
 import { NavMenu, Tree } from "./Tree";
 import { Search } from "./Search";
 import { Icon } from "./Icon";
+import { CODE_OPTIONS, DEFAULT_FONT, FONT_OPTIONS, LINE_HEIGHTS, SPACINGS, WIDTHS, fontVars, type FontPrefs } from "./fonts";
 import { useNoteIndex, useNoteTexts, frontmatterTags, inlineTags } from "./notes";
 
 const store = {
@@ -65,6 +66,8 @@ export function App() {
   const [theme, setTheme] = useState<string>(store.get("theme", "system"));
   const [accent, setAccent] = useState<string>(store.get("accent", ""));
   const [showSettings, setShowSettings] = useState(false);
+  const [font, setFont] = useState<FontPrefs>({ ...DEFAULT_FONT, ...store.get<Partial<FontPrefs>>("font", {}) });
+  const setFontPref = (patch: Partial<FontPrefs>) => setFont((f) => ({ ...f, ...patch }));
   const [err, setErr] = useState("");
 
   const [current, setCurrent] = useState(pathFromHash());
@@ -201,6 +204,12 @@ export function App() {
     store.set("theme", theme);
     store.set("accent", accent);
   }, [theme, accent]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    for (const [k, v] of Object.entries(fontVars(font))) (v ? root.style.setProperty(k, v) : root.style.removeProperty(k));
+    store.set("font", font);
+  }, [font]);
   useEffect(() => {
     document.querySelectorAll<HTMLElement>(".pdf-embed[data-src]").forEach((el) => {
       if (el.querySelector("iframe")) return;
@@ -355,6 +364,63 @@ export function App() {
                 <option value="vault">Obsidian mode</option>
               </select>
             </label>
+            <div class="settings-group">Reading and fonts</div>
+            <label title="Typeface for note text. Only fonts already installed on your device are used">
+              Font
+              <select value={font.family} onChange={(e) => setFontPref({ family: (e.target as HTMLSelectElement).value })}>
+                {FONT_OPTIONS.map((o) => <option value={o.id}>{o.label}</option>)}
+              </select>
+            </label>
+            {font.family === "custom" && (
+              <label>
+                Font name
+                <input type="text" placeholder="e.g. Atkinson Hyperlegible" value={font.custom} onInput={(e) => setFontPref({ custom: (e.target as HTMLInputElement).value })} />
+              </label>
+            )}
+            <label title="Text size for notes">
+              Text size {font.size ? `(${font.size}px)` : "(default)"}
+              <input type="range" min="13" max="26" step="1" value={font.size || 16} onInput={(e) => setFontPref({ size: Number((e.target as HTMLInputElement).value) })} />
+            </label>
+            <label title="Space between lines of text">
+              Line spacing
+              <select value={String(font.lh)} onChange={(e) => setFontPref({ lh: Number((e.target as HTMLSelectElement).value) })}>
+                {LINE_HEIGHTS.map((o) => <option value={String(o.v)}>{o.label}</option>)}
+              </select>
+            </label>
+            <label title="Space between letters. Slightly wider spacing can help some readers">
+              Letter spacing
+              <select value={font.spacing} onChange={(e) => setFontPref({ spacing: (e.target as HTMLSelectElement).value })}>
+                {SPACINGS.map((o) => <option value={o.v}>{o.label}</option>)}
+              </select>
+            </label>
+            {!mobile && (
+              <label title="Maximum width of the text column">
+                Text width
+                <select value={font.width} onChange={(e) => setFontPref({ width: (e.target as HTMLSelectElement).value })}>
+                  {WIDTHS.map((o) => <option value={o.v}>{o.label}</option>)}
+                </select>
+              </label>
+            )}
+            <label title="Typeface for code blocks and raw markdown">
+              Code font
+              <select value={font.code} onChange={(e) => setFontPref({ code: (e.target as HTMLSelectElement).value })}>
+                {CODE_OPTIONS.map((o) => <option value={o.id}>{o.label}</option>)}
+              </select>
+            </label>
+            {font.code === "custom" && (
+              <label>
+                Code font name
+                <input type="text" placeholder="e.g. JetBrains Mono" value={font.codeCustom} onInput={(e) => setFontPref({ codeCustom: (e.target as HTMLInputElement).value })} />
+              </label>
+            )}
+            <label class="check" title="Use the chosen font for menus, buttons and navigation too">
+              <input type="checkbox" checked={font.ui} onChange={(e) => setFontPref({ ui: (e.target as HTMLInputElement).checked })} />
+              Also use this font for menus and controls
+            </label>
+            <div class="font-preview md">
+              <b>Preview.</b> The quick brown fox jumps over the lazy dog. Il1 O0 rn m. <code>const x = 42;</code>
+            </div>
+            <button class="reset-font" onClick={() => setFont({ ...DEFAULT_FONT })}>Reset fonts</button>
             <div class="muted small">
               Vault attachment folder (from .obsidian/app.json): <code>{boot.cfg.obsidian?.attachmentFolderPath ?? "not set"}</code>
             </div>

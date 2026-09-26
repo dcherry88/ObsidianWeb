@@ -236,6 +236,16 @@ How it works: on start and then every `FNS_SYNC_INTERVAL` seconds (default 60; `
 | `git` errors in Docker | Vault isn't a git repo, or the mount path is wrong. |
 | Save fails with "writes disabled" | Start the server with `ALLOW_WRITE=1`. |
 
+## Roadmap
+Ideas to revisit, not commitments.
+
+### Hosted site (server mode)
+- **Multi-vault support.** Point the server at a root folder or several vault folders, with a switcher in the interface to flip between them.
+- **Multi-vault Fast Note Sync.** A settings section to configure several FNS connections, each with a URL, vault name and token. This is an admin-level permission, which leads to the next items.
+  - Connection data such as tokens must be **stored encrypted**, so it can't be scraped from the Docker data volume.
+- **OIDC role support.** Today every signed-in user has the same access. Admin would be the base level, with custom role names configurable.
+  - Set FNS vault access **per connection by role**.
+
 ## Contributing
 Issues and PRs are welcome. `npm run typecheck` checks the app and server.
 

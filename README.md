@@ -20,6 +20,29 @@ It runs two ways from the same frontend:
 ## What it renders
 Markdown (tables, task lists, code highlighting), YAML frontmatter, `[[wikilinks]]` and `[[link|alias]]`, `#tags`, `==highlights==`, `> [!note]` callouts, and images via `![[img.png|width]]` or `![](img.png)`. Attachments are found using the `attachmentFolderPath` from the vault's `.obsidian/app.json`. Other Obsidian settings, plugins, Canvas and Dataview are not supported.
 
+### Vertical sections (dashboard grids)
+Lay out key/value tables in rows and columns using HTML-comment directives. Plain Obsidian ignores the comments and shows the tables normally; ObsidianWeb renders them as a borderless grid.
+```markdown
+<!-- sections -->
+<!-- col1 -->
+| Sites | |
+|---|---|
+| Home | https://example.com |
+
+<!-- col2 -->
+| Servers | |
+|---|---|
+| web-01 | 10.0.0.11 |
+
+<!-- row -->
+<!-- col1 -->
+| Contacts | |
+|---|---|
+| Lead | [[People/Ada Lovelace]] |
+<!-- /sections -->
+```
+Each table's header row is the section title and the two columns are key and value. `<!-- colN -->` picks the column for what follows (`<!-- col -->` = next column), several tables under one column stack, `<!-- row -->` starts a new row, and `<!-- /sections -->` ends the grid. Up to 6 columns; they stack on narrow screens. Live example: `vault/Guide/Vertical Sections.md`.
+
 ## Repo layout
 ```
 vault/     your notes (a normal Obsidian vault; open this folder in Obsidian)

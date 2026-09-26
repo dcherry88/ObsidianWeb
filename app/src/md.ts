@@ -67,6 +67,66 @@ export function resolveAsset(ctx: RenderCtx, target: string): string | undefined
   return ctx.all.filter((f) => f.split("/").pop()!.toLowerCase() === base).sort((a, b) => a.length - b.length)[0];
 }
 
+// ---- Vertical sections: a grid of key/value tables, driven by HTML-comment directives (invisible in plain Obsidian) ----
+//   <!-- sections -->      start a grid           <!-- /sections -->   end it (optional at end of note)
+//   <!-- row -->           start a new grid row   (the first row is implicit)
+//   <!-- col1 -->, <!-- col2 --> ...  put the content that follows in that column; <!-- col --> = next column
+type Seg = { type: "md"; text: string } | { type: "sections"; rows: Map<number, string>[] };
+const RE_START = /^\s*<!--\s*(?:vertical[- ]?)?sections\s*-->\s*$/i;
+const RE_END = /^\s*<!--\s*\/\s*(?:vertical[- ]?)?sections\s*-->\s*$/i;
+const RE_ROW = /^\s*<!--\s*row\s*-->\s*$/i;
+const RE_COL = /^\s*<!--\s*col(?:umn)?\s*(\d+)?\s*-->\s*$/i;
+
+function splitSections(body: string): Seg[] {
+  const out: Seg[] = [];
+  let md: string[] = [];
+  let rows: Map<number, string>[] | null = null;
+  let col = 1;
+  let fence = false;
+  const flush = () => {
+    if (md.length) out.push({ type: "md", text: md.join("\n") });
+    md = [];
+  };
+  const put = (line: string) => {
+    const row = rows![rows!.length - 1];
+    row.set(col, (row.get(col) ?? "") + line + "\n");
+  };
+  for (const line of body.split("\n")) {
+    if (/^\s*(```|~~~)/.test(line)) fence = !fence;
+    if (!fence && !rows && RE_START.test(line)) {
+      flush();
+      rows = [new Map()];
+      col = 1;
+    } else if (!fence && rows && RE_END.test(line)) {
+      out.push({ type: "sections", rows: rows.filter((r) => r.size) });
+      rows = null;
+    } else if (!fence && rows && RE_ROW.test(line)) {
+      rows.push(new Map());
+      col = 1;
+    } else if (!fence && rows && RE_COL.test(line)) {
+      const n = RE_COL.exec(line)![1];
+      col = n ? Math.max(1, parseInt(n, 10)) : col + 1;
+    } else if (rows) put(line);
+    else md.push(line);
+  }
+  if (rows) out.push({ type: "sections", rows: rows.filter((r) => r.size) });
+  flush();
+  return out;
+}
+
+function renderSectionGrid(rows: Map<number, string>[], render: (t: string) => string): string {
+  const html = rows
+    .map((row) => {
+      const cols = [...row.entries()].sort((a, b) => a[0] - b[0]);
+      const max = Math.max(...cols.map(([n]) => n));
+      return `<div class="vrow" style="--cols:${Math.min(max, 6)}">${cols
+        .map(([n, text]) => `<div class="vcol" style="grid-column:${Math.min(n, 6)}">${render(text)}</div>`)
+        .join("")}</div>`;
+    })
+    .join("");
+  return `<div class="vsections">${html}</div>`;
+}
+
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 
 export function renderMarkdown(src: string, files: string[], ctx?: RenderCtx): string {
@@ -148,7 +208,9 @@ export function renderMarkdown(src: string, files: string[], ctx?: RenderCtx): s
     return defaultHeading ? defaultHeading(tokens, i, opts, env, self) : self.renderToken(tokens, i, opts);
   };
 
-  let html = md.render(splitFrontmatter(src).body);
+  let html = splitSections(splitFrontmatter(src).body)
+    .map((seg) => (seg.type === "md" ? md.render(seg.text) : renderSectionGrid(seg.rows, (t) => md.render(t))))
+    .join("");
 
   // Obsidian extras applied on rendered HTML (skipping code blocks)
   html = html

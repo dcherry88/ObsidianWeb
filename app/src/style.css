@@ -236,3 +236,4 @@ pre.fm { font-size: 12px; color: var(--muted); border: 1px solid var(--border); 
 .app.web .nav-section + .nav-section { margin-top: 2px; }
 .sync-msg { font-size: 12px; color: var(--muted); white-space: nowrap; }
 .tb-btn:disabled { opacity: 0.5; cursor: default; }
+.nav-section + .nav-item { margin-top: 8px; }

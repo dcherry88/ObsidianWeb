@@ -56,8 +56,10 @@ const pretty = (s: string) => s.replace(/\.md$/, "");
 
 function NavBranch({ node, depth, open, toggle, current, onOpen }: any) {
   const kids = sorted(node);
-  // files first (like doc sites), then sections
-  const ordered = [...kids.filter((k: Node) => k.file), ...kids.filter((k: Node) => !k.file)];
+  // inside a folder: pages first, then sub-sections. At the top level: folders first, loose pages below them.
+  const files = kids.filter((k: Node) => k.file);
+  const dirs = kids.filter((k: Node) => !k.file);
+  const ordered = depth === 0 ? [...dirs, ...files] : [...files, ...dirs];
   return (
     <>
       {ordered.map((c: Node) =>

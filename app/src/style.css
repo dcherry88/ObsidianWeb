@@ -72,7 +72,6 @@ pre.fm { font-size: 12px; color: var(--muted); border: 1px solid var(--border); 
 .hljs-number, .hljs-literal { color: #ffab70; } .hljs-comment { color: var(--muted); }
 .hljs-title, .hljs-function { color: #82aaff; }
 
-@media (max-width: 800px) { .right { display: none; } .side { width: 200px; } }
 
 /* Doc Site layout */
 .site-title { padding: 14px 14px 6px; font-weight: 600; font-size: 16px; }
@@ -237,3 +236,58 @@ pre.fm { font-size: 12px; color: var(--muted); border: 1px solid var(--border); 
 .sync-msg { font-size: 12px; color: var(--muted); white-space: nowrap; }
 .tb-btn:disabled { opacity: 0.5; cursor: default; }
 .nav-section + .nav-item { margin-top: 8px; }
+
+/* ===== Mobile (max-width 800px): Web layout with drawers ===== */
+@supports (height: 100dvh) { .app { height: 100dvh; } }
+.drawer-head, .backdrop, .more { display: none; }
+@media (max-width: 800px) {
+  body { font-size: 15px; }
+  .topbar, .app.web .topbar { padding: 8px 10px; padding-top: max(8px, env(safe-area-inset-top)); gap: 8px; }
+  .brand { font-size: 0; }              /* keep only the accent dot */
+  .brand::before { margin-right: 0 !important; width: 14px !important; height: 14px !important; }
+  .tb-btn, .toolbar button { min-height: 38px; padding: 6px 12px; }
+  .search-box { position: static; max-width: none; }
+  .search-box input, .app.web .search-box input { font-size: 16px; padding: 8px 14px; }  /* 16px stops iOS zooming on focus */
+  .search-results { position: fixed; left: 8px; right: 8px; top: 58px; max-height: 65vh; }
+  .hit { padding: 10px 12px; }
+  .more { display: block; position: relative; }
+  .more-menu { position: absolute; right: 0; top: 100%; margin-top: 6px; min-width: 180px; background: var(--bg); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 8px 24px #0006; padding: 6px; z-index: 40; display: flex; flex-direction: column; }
+  .more-menu button { text-align: left; border: 0; background: transparent; padding: 10px 12px; min-height: 42px; border-radius: 8px; }
+  .more-menu button:hover { background: var(--bg3); }
+  .sync-msg { position: fixed; bottom: calc(16px + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); background: var(--bg2); border: 1px solid var(--border); padding: 8px 14px; border-radius: 999px; box-shadow: 0 4px 16px #0006; z-index: 60; }
+
+  .backdrop { display: block; position: fixed; inset: 0; background: #0008; z-index: 25; }
+  .drawer-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+  .drawer-head button { border-radius: 999px; min-width: 36px; min-height: 36px; }
+
+  .app.mobile .side { position: fixed; z-index: 30; top: 0; bottom: 0; left: 0; width: min(86vw, 340px); border-right: 1px solid var(--border); box-shadow: 8px 0 30px #0007; animation: drawer-in 0.18s ease-out; padding-bottom: env(safe-area-inset-bottom); }
+  .app.mobile .side .site-title { display: none; }
+  .app.mobile .right { position: fixed; z-index: 30; left: 0; right: 0; bottom: 0; width: auto; height: 68vh; border: 1px solid var(--border); border-radius: 16px 16px 0 0; box-shadow: 0 -8px 30px #0007; animation: sheet-in 0.2s ease-out; padding-bottom: env(safe-area-inset-bottom); }
+  .app.mobile .nav-item { padding: 10px 12px; margin: 0 6px; font-size: 15px; }
+  .app.mobile .nav-heading { padding: 10px 12px 4px; margin-top: 6px; }
+  .app.mobile .right .row { padding: 10px 12px; }
+
+  .app.web .toolbar { padding: 8px 14px 0; gap: 6px; }
+  .crumb { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+  .app.web .md, .md { padding: 8px 16px 96px; font-size: 16px; line-height: 1.7; max-width: none; }
+  .app.web .md h1 { font-size: 1.75rem; }
+  .md table { display: block; overflow-x: auto; max-width: 100%; }
+  .md .vsections table { display: table; }
+  .md pre { font-size: 13px; }
+  .pdf-embed { height: 60vh; }
+  .pdf-page { height: calc(100dvh - 140px); }
+  .modal { width: 94vw; max-height: 90vh; overflow: auto; }
+  .modal select, .modal input { font-size: 16px; min-height: 36px; }
+}
+@keyframes drawer-in { from { transform: translateX(-100%); } to { transform: none; } }
+@keyframes sheet-in { from { transform: translateY(100%); } to { transform: none; } }
+@media (max-width: 800px) {
+  .app.mobile .brand { display: none; }
+  .app.mobile .topbar .grow { display: none; }
+  .app.mobile .search-box { flex: 1; min-width: 0; }
+}
+@media (max-width: 800px) {
+  .md .vsections th, .md .vsections td { overflow-wrap: anywhere; }
+  .md .vsections table { table-layout: fixed; }
+  .md .vsections tbody td:first-child { width: 34%; }
+}

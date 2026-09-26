@@ -43,6 +43,18 @@ function RibbonBtn(p: { icon: string; label: string; tip: string; on?: boolean; 
   );
 }
 
+const MOBILE_Q = "(max-width: 800px)";
+function useMobile() {
+  const [m, setM] = useState(() => typeof matchMedia !== "undefined" && matchMedia(MOBILE_Q).matches);
+  useEffect(() => {
+    const mq = matchMedia(MOBILE_Q);
+    const on = () => setM(mq.matches);
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
+  return m;
+}
+
 export function App() {
   const [boot, setBoot] = useState<{ cfg: AppConfig; provider: VaultProvider } | null>(null);
   const [allFiles, setFiles] = useState<string[]>([]);
@@ -59,14 +71,19 @@ export function App() {
   const [content, setContent] = useState("");
   const [draft, setDraft] = useState<string | null>(null);
   const [mode, setMode] = useState<"preview" | "edit" | "raw">("preview");
-  const [layout, setLayout] = useState<"doc" | "vault">(store.get("layout", "doc"));
+  const [layoutPref, setLayout] = useState<"doc" | "vault">(store.get("layout", "doc"));
+  // phones always get the Web layout (tabs, split panes and the editor need a wide screen); the saved choice still applies on desktop
+  const mobile = useMobile();
+  const layout = mobile ? "doc" : layoutPref;
+  const [moreOpen, setMoreOpen] = useState(false);
   // Web-mode nav: only the folders holding the current page are open; clicking a heading opens/closes it until the next page change
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState("");
   const [openNav, setOpenNav] = useState<Set<string>>(new Set());
   const [sideView, setSideView] = useState<"tree" | "nav">(store.get("sideView", "tree"));
-  const [showSide, setShowSide] = useState(true);
-  const [showRight, setShowRight] = useState(true);
+  // on phones the side and right panels are drawers, closed by default
+  const [showSide, setShowSide] = useState(() => !(typeof matchMedia !== "undefined" && matchMedia(MOBILE_Q).matches));
+  const [showRight, setShowRight] = useState(() => !(typeof matchMedia !== "undefined" && matchMedia(MOBILE_Q).matches));
   const [rightTab, setRightTab] = useState<"outline" | "backlinks" | "tags" | "history">("outline");
   const [openTag, setOpenTag] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -114,6 +131,20 @@ export function App() {
   }, [provider, current]);
 
   useEffect(() => setOpenNav(ancestorsOf(current)), [current]);
+
+  // switching between phone and desktop sizes: drawers closed on phones, panels open on desktop
+  useEffect(() => {
+    setShowSide(!mobile);
+    setShowRight(!mobile);
+    setMoreOpen(false);
+  }, [mobile]);
+  // opening a page closes the drawers
+  useEffect(() => {
+    if (mobile) {
+      setShowSide(false);
+      setShowRight(false);
+    }
+  }, [current]);
 
   // <div class="pdf-embed" data-src> placeholders (produced by the markdown renderer) become real PDF viewers
   const pdfKey = current + "|" + mode + "|" + (selected?.sha ?? "");
@@ -243,31 +274,51 @@ export function App() {
   const diff = selected ? diffLines(oldContent, text) : null;
 
   return (
-    <div class={"app " + (layout === "doc" ? "web" : "obs")}>
+    <div class={"app " + (layout === "doc" ? "web" : "obs") + (mobile ? " mobile" : "")}>
       <header class="topbar">
         {layout === "doc" && (
-          <button class="tb-btn" title="Show or hide the navigation menu" onClick={() => setShowSide(!showSide)}>☰ Menu</button>
+          <button class="tb-btn menu-btn" title="Show or hide the navigation menu" aria-label="Navigation menu" onClick={() => (setShowSide(!showSide), setShowRight(false), setMoreOpen(false))}>{mobile ? "☰" : "☰ Menu"}</button>
         )}
         <span class="brand" title="Home" onClick={() => location.assign("#/")}>ObsidianWeb</span>
-        <div class="seg" role="group" aria-label="View mode">
-          <button class={layout === "doc" ? "on" : ""} title="Web mode: a wiki-style site, one page at a time" onClick={() => setLayoutPersist("doc")}>Web</button>
-          <button class={layout === "vault" ? "on" : ""} title="Obsidian mode: tabs, split view and editor" onClick={() => setLayoutPersist("vault")}>Obsidian</button>
-        </div>
+        {!mobile && (
+          <div class="seg" role="group" aria-label="View mode">
+            <button class={layout === "doc" ? "on" : ""} title="Web mode: a wiki-style site, one page at a time" onClick={() => setLayoutPersist("doc")}>Web</button>
+            <button class={layout === "vault" ? "on" : ""} title="Obsidian mode: tabs, split view and editor" onClick={() => setLayoutPersist("vault")}>Obsidian</button>
+          </div>
+        )}
         <Search notes={navFiles} indexTotal={files.length} texts={texts} noteTags={index.noteTags} allTags={allTags} onOpen={go} />
         <span class="grow" />
         {syncMsg && <span class="sync-msg">{syncMsg}</span>}
-        {boot.cfg.canSync && (
-          <button class="tb-btn" disabled={syncing} title="Pull the latest changes from Fast Note Sync now (it also syncs automatically every minute)" onClick={forceSync}>
-            {syncing ? "Syncing…" : "↻ Sync now"}
-          </button>
-        )}
-        {layout === "doc" && (
+        {mobile ? (
+          <div class="more">
+            <button class="tb-btn" title="More: page outline, sync, settings" aria-label="More" onClick={() => setMoreOpen(!moreOpen)}>⋯</button>
+            {moreOpen && (
+              <div class="more-menu" onClick={() => setMoreOpen(false)}>
+                <button onClick={() => (setShowRight(true), setShowSide(false))}>On this page</button>
+                {boot.cfg.canSync && (
+                  <button disabled={syncing} onClick={forceSync}>{syncing ? "Syncing…" : "↻ Sync now"}</button>
+                )}
+                <button onClick={() => setShowSettings(true)}>⚙ Settings</button>
+              </div>
+            )}
+          </div>
+        ) : (
           <>
-            <button class="tb-btn" title="Show or hide the 'On this page' and History panel" onClick={() => setShowRight(!showRight)}>On this page</button>
-            <button class="tb-btn" title="Theme, colors and default view" onClick={() => setShowSettings(true)}>⚙ Settings</button>
+            {boot.cfg.canSync && (
+              <button class="tb-btn" disabled={syncing} title="Pull the latest changes from Fast Note Sync now (it also syncs automatically every minute)" onClick={forceSync}>
+                {syncing ? "Syncing…" : "↻ Sync now"}
+              </button>
+            )}
+            {layout === "doc" && (
+              <>
+                <button class="tb-btn" title="Show or hide the 'On this page' and History panel" onClick={() => setShowRight(!showRight)}>On this page</button>
+                <button class="tb-btn" title="Theme, colors and default view" onClick={() => setShowSettings(true)}>⚙ Settings</button>
+              </>
+            )}
           </>
         )}
       </header>
+      {mobile && (showSide || showRight) && <div class="backdrop" onClick={() => (setShowSide(false), setShowRight(false))} />}
     <div class={"shell " + (layout === "doc" ? "doc-mode" : "vault-mode")}>
       {layout === "vault" && <div class="ribbon">
         <RibbonBtn icon="☰" label="Sidebar" tip="Show or hide the left sidebar" onClick={() => setShowSide(!showSide)} />
@@ -331,6 +382,7 @@ export function App() {
 
       {showSide && (
         <aside class="side">
+          {mobile && <div class="drawer-head"><b>Pages</b><button title="Close" onClick={() => setShowSide(false)}>✕</button></div>}
           {layout === "doc" && <div class="site-title">Docs</div>}
           {layout === "vault" && sideView === "nav" && (
             <input class="search" placeholder="Search files…" value={search} onInput={(e) => setSearch((e.target as HTMLInputElement).value)} />
@@ -450,6 +502,7 @@ export function App() {
 
       {showRight && (
         <aside class="right">
+          {mobile && <div class="drawer-head"><b>This page</b><button title="Close" onClick={() => setShowRight(false)}>✕</button></div>}
           <div class="tabs small">
             <div class={"tab" + (rightTab === "outline" ? " active" : "")} onClick={() => setRightTab("outline")}>{layout === "doc" ? "On this page" : "Outline"}</div>
             <div class={"tab" + (rightTab === "backlinks" ? " active" : "")} title="Notes that link to this one" onClick={() => setRightTab("backlinks")}>Backlinks{myBacklinks.length ? ` (${myBacklinks.length})` : ""}</div>
@@ -459,7 +512,7 @@ export function App() {
           <div class="scroll">
             {rightTab === "outline" &&
               heads.map((h) => (
-                <div class="row" style={{ paddingLeft: 8 + (h.level - 1) * 12 }} onClick={() => document.getElementById(slug(h.text))?.scrollIntoView({ behavior: "smooth" })}>
+                <div class="row" style={{ paddingLeft: 8 + (h.level - 1) * 12 }} onClick={() => (mobile && setShowRight(false), document.getElementById(slug(h.text))?.scrollIntoView({ behavior: "smooth" }))}>
                   {h.text}
                 </div>
               ))}

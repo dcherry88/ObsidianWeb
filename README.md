@@ -260,10 +260,12 @@ Ideas to revisit, not commitments.
   - Sync changes back to FNS, as long as the token's permissions allow it (the token would need write access to notes and attachments).
 
 ### Both modes
-- **Mobile-friendly view.** A layout designed for phones, not just a narrower desktop page.
-  - A different navigation layout, for example a slide-out menu or bottom bar instead of the side panels.
-  - The right panel (outline, backlinks, tags, history) becomes a drawer or sheet.
-  - Larger touch targets, and search that works well on a small screen.
+- **Mobile-friendly view.** First version done: phones (under 800px) get the Web layout with a slide-out page menu, a bottom sheet for outline, backlinks, tags and history, a compact top bar with search and a ⋯ menu, larger touch targets, and grids and tables that stack or scroll. Ideas still open:
+  - A bottom navigation bar, and swipe gestures to open and close the drawers.
+  - A tablet layout between phone and desktop.
+  - Installable web app (home-screen icon, offline reading).
+  - PDFs on iOS only show the first page inside a frame, so open them in a new tab or a dedicated viewer.
+  - Editing on a phone, once hosted-site editing exists.
 
 ## Contributing
 Issues and PRs are welcome. `npm run typecheck` checks the app and server.

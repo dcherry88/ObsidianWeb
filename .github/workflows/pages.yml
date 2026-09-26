@@ -22,8 +22,22 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      # Optional: use a vault that lives in a different repo (set repo variables VAULT_REPO / VAULT_BRANCH)
+      - name: Check out external vault
+        if: ${{ vars.VAULT_REPO != '' }}
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.VAULT_REPO }}
+          ref: ${{ vars.VAULT_BRANCH }}
+          path: vault-external
       - run: npm install
       - run: npm run build:static
+        env:
+          VAULT_DIR: ${{ vars.VAULT_REPO != '' && 'vault-external' || 'vault' }}
+          VAULT_REPO: ${{ vars.VAULT_REPO }}
+          VAULT_BRANCH: ${{ vars.VAULT_BRANCH }}
+          VAULT_REPO_PATH: ${{ vars.VAULT_REPO_PATH }}
+          DEFAULT_LAYOUT: ${{ vars.DEFAULT_LAYOUT }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: app/dist

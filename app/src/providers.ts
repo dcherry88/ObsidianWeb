@@ -31,20 +31,21 @@ export class ApiProvider implements VaultProvider {
 export class StaticProvider implements VaultProvider {
   canWrite = false;
   constructor(private cfg: AppConfig) {}
-  private get vaultDir() {
-    return (this.cfg.vaultPath ?? "vault").replace(/^\/|\/$/g, "");
+  /** path of a note inside the GitHub repo (the vault may be the repo root, i.e. vaultPath "") */
+  private repoPath(p: string) {
+    return [(this.cfg.vaultPath ?? "vault").replace(/^\/|\/$/g, ""), p].filter(Boolean).join("/");
   }
   tree = async () => (await ok(await fetch("./index.json"))).json() as Promise<string[]>;
   assetUrl = (path: string) => `./vault/${enc(path)}`;
   read = async (path: string, ref?: string) => {
     const url = ref
-      ? `https://raw.githubusercontent.com/${this.cfg.repo}/${ref}/${enc(`${this.vaultDir}/${path}`)}`
+      ? `https://raw.githubusercontent.com/${this.cfg.repo}/${ref}/${enc(this.repoPath(path))}`
       : `./vault/${enc(path)}`;
     return (await ok(await fetch(url))).text();
   };
   history = async (path: string) => {
     const q = new URLSearchParams({
-      path: `${this.vaultDir}/${path}`,
+      path: this.repoPath(path),
       sha: this.cfg.branch ?? "main",
       per_page: "50",
     });

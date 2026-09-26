@@ -27,10 +27,14 @@ try {
   obsidian = { attachmentFolderPath: JSON.parse(readFileSync(path.join(vault, ".obsidian/app.json"), "utf8")).attachmentFolderPath };
 } catch {}
 
-const repo = process.env.GITHUB_REPOSITORY ?? "dcherry88/ObsidianWeb";
-const branch = process.env.GITHUB_REF_NAME ?? "main";
+// History comes from the GitHub API, so record which repo/branch/subfolder the vault lives in.
+// Default: the vault is a folder in this same repo. Set VAULT_REPO when the vault is checked out from a different repo.
+const external = !!process.env.VAULT_REPO;
+const repo = process.env.VAULT_REPO || process.env.GITHUB_REPOSITORY || "dcherry88/ObsidianWeb";
+const branch = (external ? process.env.VAULT_BRANCH : process.env.GITHUB_REF_NAME) || "main";
+const repoPath = external ? (process.env.VAULT_REPO_PATH ?? "") : vaultDir;
 writeFileSync(
   path.join(dist, "config.json"),
-  JSON.stringify({ mode: "static", canWrite: false, defaultLayout: process.env.DEFAULT_LAYOUT === "vault" ? "vault" : "doc", obsidian, repo, branch, vaultPath: vaultDir }),
+  JSON.stringify({ mode: "static", canWrite: false, defaultLayout: process.env.DEFAULT_LAYOUT === "vault" ? "vault" : "doc", obsidian, repo, branch, vaultPath: repoPath }),
 );
 console.log(`static build: ${md.length} notes, repo=${repo}@${branch}`);

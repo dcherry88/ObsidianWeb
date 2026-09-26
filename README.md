@@ -250,6 +250,12 @@ Ideas to revisit, not commitments.
   - Modify raw markdown.
   - Sync changes back to FNS, as long as the token's permissions allow it (the token would need write access to notes and attachments).
 
+### Both modes
+- **Mobile-friendly view.** A layout designed for phones, not just a narrower desktop page.
+  - A different navigation layout, for example a slide-out menu or bottom bar instead of the side panels.
+  - The right panel (outline, backlinks, tags, history) becomes a drawer or sheet.
+  - Larger touch targets, and search that works well on a small screen.
+
 ## Contributing
 Issues and PRs are welcome. `npm run typecheck` checks the app and server.
 

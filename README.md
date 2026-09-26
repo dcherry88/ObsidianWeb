@@ -19,7 +19,7 @@ It runs two ways from the same frontend:
 | Auth | None | Optional OIDC login (Pocket ID, Entra ID, ...) |
 
 ## What it renders
-Markdown (tables, task lists, code highlighting), YAML frontmatter, `[[wikilinks]]` and `[[link|alias]]`, `#tags`, `==highlights==`, `> [!note]` callouts, and images via `![[img.png|width]]` or `![](img.png)`. Attachments are found using the `attachmentFolderPath` from the vault's `.obsidian/app.json`. Other Obsidian settings, plugins, Canvas and Dataview are not supported.
+Markdown (tables, task lists, code highlighting), YAML frontmatter, `[[wikilinks]]` and `[[link|alias]]`, `#tags`, `==highlights==`, `> [!note]` callouts, and images via `![[img.png|width]]` or `![](img.png)`, and PDFs: `![[file.pdf]]` embeds the browser's PDF viewer (`![[file.pdf#page=2|400]]` starts on page 2 at 400px tall), `[[file.pdf]]` links to it, and PDFs in the vault appear in the navigation and open as pages of their own. Attachments are found using the `attachmentFolderPath` from the vault's `.obsidian/app.json`. Other Obsidian settings, plugins, Canvas and Dataview are not supported.
 
 ### Vertical sections (dashboard grids)
 Lay out key/value tables in rows and columns using HTML-comment directives. Plain Obsidian ignores the comments and shows the tables normally; ObsidianWeb renders them as a borderless grid.
@@ -194,7 +194,7 @@ docker compose up -d --build
 ```
 The included `docker-compose.yml` runs both services. To use an FNS you already run, set the `FNS_*` variables on the `obsidianweb` service only.
 
-How it works: on start and then every `FNS_SYNC_INTERVAL` seconds (default 60; `0` disables the timer) the server lists notes and attachments through FNS's REST API, downloads the ones whose content hash changed into `/data/vault`, and removes ones that were deleted. If FNS is unreachable it keeps serving the last copy and shows the error at `/api/sync/status`. `POST /api/sync` triggers an immediate sync. Note history and diffs come from FNS's own per-note history. This mode is **read-only**.
+How it works: on start and then every `FNS_SYNC_INTERVAL` seconds (default 60; `0` disables the timer) the server lists notes and attachments through FNS's REST API, downloads the ones whose content hash changed into `/data/vault`, and removes ones that were deleted. If FNS is unreachable it keeps serving the last copy and shows the error at `/api/sync/status`. The **↻ Sync now** button in the top bar (or `POST /api/sync`) pulls from FNS immediately and waits for the result. Note history and diffs come from FNS's own per-note history. This mode is **read-only**.
 
 | Variable | Meaning |
 |---|---|
@@ -221,6 +221,7 @@ How it works: on start and then every `FNS_SYNC_INTERVAL` seconds (default 60; `
 - **Search**: top bar, `/` or `Ctrl/Cmd+K`. Matches note names and text.
 - **Show raw**: toolbar button, shows the markdown source (including frontmatter).
 - **History**: right panel. Click a commit to view that version and see a diff against the current one.
+- **Navigation (Web mode)**: compact folder menu; opening a page expands only the folders that hold it and collapses the rest, and you can open or close any section by clicking its heading until the next page change.
 - **Split** (Obsidian mode): open a second note beside the current one, or use the ⧉ icon on a tab.
 - **Edit** (Obsidian mode, server with `ALLOW_WRITE=1`): editor with live preview; `Ctrl/Cmd+S` saves and commits. In static mode the editor is view-only and nothing is saved.
 - **Settings** (⚙): theme, accent color, default view. Stored in the browser only.

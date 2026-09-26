@@ -67,6 +67,19 @@ export class StaticProvider implements VaultProvider {
   };
 }
 
+export interface SyncResult {
+  ok: boolean;
+  error?: string;
+  changed: number;
+  notes: number;
+  files: number;
+}
+
+/** Ask the server to pull from Fast Note Sync right now (server mode with VAULT_SOURCE=fns). */
+export async function syncNow(): Promise<SyncResult> {
+  return (await ok(await fetch("./api/sync", { method: "POST" }))).json() as Promise<SyncResult>;
+}
+
 export async function loadProvider(): Promise<{ cfg: AppConfig; provider: VaultProvider }> {
   let cfg: AppConfig = { mode: "server", canWrite: false };
   try {

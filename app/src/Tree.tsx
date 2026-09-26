@@ -54,7 +54,7 @@ export function Tree(props: { files: string[]; open: Set<string>; toggle: (p: st
 
 const pretty = (s: string) => s.replace(/\.md$/, "");
 
-function NavBranch({ node, depth, closed, toggle, current, onOpen }: any) {
+function NavBranch({ node, depth, open, toggle, current, onOpen }: any) {
   const kids = sorted(node);
   // files first (like doc sites), then sections
   const ordered = [...kids.filter((k: Node) => k.file), ...kids.filter((k: Node) => !k.file)];
@@ -68,9 +68,9 @@ function NavBranch({ node, depth, closed, toggle, current, onOpen }: any) {
         ) : (
           <div class="nav-section">
             <div class={"nav-heading d" + Math.min(depth, 2)} style={{ paddingLeft: 14 + depth * 14 }} onClick={() => toggle(c.path)}>
-              <span class="chev">{closed.has(c.path) ? "▸" : "▾"}</span> {c.name}
+              <span class="chev">{open.has(c.path) ? "▾" : "▸"}</span> {c.name}
             </div>
-            {!closed.has(c.path) && <NavBranch node={c} depth={depth + 1} closed={closed} toggle={toggle} current={current} onOpen={onOpen} />}
+            {open.has(c.path) && <NavBranch node={c} depth={depth + 1} open={open} toggle={toggle} current={current} onOpen={onOpen} />}
           </div>
         ),
       )}
@@ -79,6 +79,6 @@ function NavBranch({ node, depth, closed, toggle, current, onOpen }: any) {
 }
 
 /** Wiki/doc-site style navigation: folders are section headings (expanded by default), pages are links beneath. */
-export function NavMenu(props: { files: string[]; closed: Set<string>; toggle: (p: string) => void; current: string; onOpen: (p: string) => void }) {
+export function NavMenu(props: { files: string[]; open: Set<string>; toggle: (p: string) => void; current: string; onOpen: (p: string) => void }) {
   return <NavBranch node={build(props.files)} depth={0} {...props} />;
 }

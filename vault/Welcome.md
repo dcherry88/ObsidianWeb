@@ -14,6 +14,7 @@ This vault exists to exercise every feature of ObsidianWeb. Start with the **[[G
 | Wikilinks and backlinks | [[Guide/Links and Backlinks]] |
 | Tags (frontmatter and inline) | [[Guide/Tags Demo]] |
 | Images and attachments | [[Reference/Images]] |
+| PDFs (embedded and as pages) | [[Reference/PDFs]] |
 | Vertical sections (dashboard grid) | [[Guide/Vertical Sections]] |
 | Nested folders | [[Archive/2025/Q4/Retro]] |
 | Version history and diffs | [[Guide/History Demo]] |

@@ -15,6 +15,8 @@ export interface AppConfig {
   /** signed-in user when OIDC is enabled */
   user?: { name?: string; email?: string };
   signOutUrl?: string;
+  /** server can pull from Fast Note Sync on demand (POST /api/sync) */
+  canSync?: boolean;
   /** static mode only: GitHub repo used for history, e.g. "owner/repo" */
   repo?: string;
   branch?: string;

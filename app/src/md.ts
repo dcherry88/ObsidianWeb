@@ -43,6 +43,7 @@ export interface RenderCtx {
   assetUrl: (path: string) => string;
 }
 
+const PDF = /\.pdf(#.*)?$/i;
 const IMG = /\.(png|jpe?g|gif|webp|svg|avif|bmp)$/i;
 const dirOf = (p: string) => (p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : "");
 const join = (...parts: string[]) => parts.filter(Boolean).join("/").replace(/\/\.\//g, "/").replace(/^\.\//, "");
@@ -158,6 +159,10 @@ export function renderMarkdown(src: string, files: string[], ctx?: RenderCtx): s
   });
   md.renderer.rules.wikilink = (tokens, i) => {
     const { target, alias } = tokens[i].meta;
+    if (PDF.test(target) && ctx) {
+      const pdfHit = resolveAsset(ctx, target);
+      if (pdfHit) return `<a class="wikilink" href="#/${pdfHit.split("/").map(encodeURIComponent).join("/")}">${esc(alias)}</a>`;
+    }
     const hit = resolveLink(files, target);
     return hit
       ? `<a class="wikilink" href="#/${hit.split("/").map(encodeURIComponent).join("/")}">${esc(alias)}</a>`
@@ -185,6 +190,14 @@ export function renderMarkdown(src: string, files: string[], ctx?: RenderCtx): s
       if (!hit) return `<span class="wikilink unresolved" title="Image not found">${esc(target)}</span>`;
       const w = /^\d+$/.test(size) ? ` width="${size}"` : "";
       return `<img src="${esc(ctx!.assetUrl(hit))}" alt="${esc(target)}"${w}>`;
+    }
+    if (PDF.test(target)) {
+      const hit = ctx && resolveAsset(ctx, target);
+      if (!hit) return `<span class="wikilink unresolved" title="PDF not found">${esc(target)}</span>`;
+      const page = /#page=(\d+)/i.exec(target)?.[1];
+      const src = ctx!.assetUrl(hit) + (page ? `#page=${page}` : "");
+      const h = /^\d+$/.test(size) ? ` style="height:${Math.min(parseInt(size, 10), 2000)}px"` : "";
+      return `<div class="pdf-embed" data-src="${esc(src)}" data-title="${esc(hit)}"${h}><a href="${esc(ctx!.assetUrl(hit))}" target="_blank" rel="noopener">${esc(hit)}</a></div>`;
     }
     const note = resolveLink(files, target);
     if (note) return `<a class="wikilink" href="#/${note.split("/").map(encodeURIComponent).join("/")}">${esc(target)}</a>`;

@@ -20,12 +20,15 @@ const tagMatches = (tag: string, term: string) => tag === term || tag.startsWith
  */
 export function Search({
   notes,
+  indexTotal,
   texts,
   noteTags,
   allTags,
   onOpen,
 }: {
   notes: string[];
+  /** number of notes whose text will be indexed (PDFs are searchable by name only) */
+  indexTotal: number;
   texts: Map<string, string>;
   noteTags: Map<string, string[]>;
   allTags: [string, string[]][];
@@ -128,7 +131,7 @@ export function Search({
               ))}
             </div>
           )}
-          {!shown.length && <div class="muted pad">No matches{ready < notes.length ? " (still indexing…)" : ""}</div>}
+          {!shown.length && <div class="muted pad">No matches{ready < indexTotal ? " (still indexing…)" : ""}</div>}
           {shown.map((h, i) => (
             <div class={"hit" + (i === sel ? " active" : "")} onMouseDown={() => pick(h.path)} onMouseEnter={() => setSel(i)}>
               <div>
@@ -142,7 +145,7 @@ export function Search({
               </div>
             </div>
           ))}
-          {ready < notes.length && <div class="muted pad small">Indexing note text… {ready}/{notes.length}</div>}
+          {ready < indexTotal && <div class="muted pad small">Indexing note text… {ready}/{indexTotal}</div>}
         </div>
       )}
     </div>

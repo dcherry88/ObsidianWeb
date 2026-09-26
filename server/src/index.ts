@@ -65,6 +65,7 @@ app.get("/config.json", async (c) => {
     obsidian: await obsidianSettings(),
     user: u ? { name: u.name, email: u.email } : undefined,
     signOutUrl: auth.enabled ? "./auth/logout" : undefined,
+    canSync: !!fns,
   } satisfies AppConfig);
 });
 
@@ -113,9 +114,11 @@ app.get("/api/raw", async (c) => {
     const p = c.req.query("path") ?? "";
     const buf = await backend.read(p);
     const ext = p.split(".").pop()!.toLowerCase();
+    // PDFs need to load in the browser's viewer (a sandboxed frame blocks it); everything else stays sandboxed.
+    const pdf = ext === "pdf";
     return c.body(new Uint8Array(buf), 200, {
       "content-type": MIME[ext] ?? "application/octet-stream",
-      "content-security-policy": "sandbox",
+      ...(pdf ? { "content-disposition": "inline" } : { "content-security-policy": "sandbox" }),
       "x-content-type-options": "nosniff",
     });
   } catch {
@@ -125,10 +128,11 @@ app.get("/api/raw", async (c) => {
 
 if (fns) {
   app.get("/api/sync/status", (c) => c.json(fns!.status));
-  // any signed-in user may trigger a resync (all users have the same access)
+  // Force a sync and wait for it. Any signed-in user may do this (all users have the same access).
   app.post("/api/sync", async (c) => {
-    void fns!.syncOnce();
-    return c.json({ started: true });
+    await fns!.syncOnce();
+    const st = fns!.status;
+    return c.json({ ok: !st.lastError, error: st.lastError, changed: st.changed, notes: st.notes, files: st.files, at: st.lastOk });
   });
 }
 

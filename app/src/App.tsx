@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { diffLines } from "diff";
 import type { AppConfig, Commit, VaultProvider } from "../../shared/types";
-import { loadProvider } from "./providers";
+import { loadProvider, syncNow } from "./providers";
 import { outline, renderMarkdown, slug, splitFrontmatter, type RenderCtx } from "./md";
 import { Editor } from "./Editor";
 import { NavMenu, Tree } from "./Tree";
@@ -27,6 +27,11 @@ const store = {
 };
 
 const pathFromHash = () => decodeURIComponent(location.hash.replace(/^#\/?/, ""));
+const isPdf = (p: string) => /\.pdf$/i.test(p);
+const ancestorsOf = (p: string) => {
+  const parts = p.split("/").slice(0, -1);
+  return new Set(parts.map((_, i) => parts.slice(0, i + 1).join("/")));
+};
 const title = (p: string) => p.split("/").pop()!.replace(/\.md$/, "");
 
 function RibbonBtn(p: { icon: string; label: string; tip: string; on?: boolean; onClick: () => void }) {
@@ -42,6 +47,8 @@ export function App() {
   const [boot, setBoot] = useState<{ cfg: AppConfig; provider: VaultProvider } | null>(null);
   const [allFiles, setFiles] = useState<string[]>([]);
   const files = useMemo(() => allFiles.filter((f) => f.endsWith(".md")), [allFiles]);
+  // notes and PDFs are browsable pages; other attachments are only referenced from notes
+  const navFiles = useMemo(() => allFiles.filter((f) => f.endsWith(".md") || isPdf(f)), [allFiles]);
   const [theme, setTheme] = useState<string>(store.get("theme", "system"));
   const [accent, setAccent] = useState<string>(store.get("accent", ""));
   const [showSettings, setShowSettings] = useState(false);
@@ -53,7 +60,10 @@ export function App() {
   const [draft, setDraft] = useState<string | null>(null);
   const [mode, setMode] = useState<"preview" | "edit" | "raw">("preview");
   const [layout, setLayout] = useState<"doc" | "vault">(store.get("layout", "doc"));
-  const [closedNav, setClosedNav] = useState<Set<string>>(new Set(store.get<string[]>("closedNav", [])));
+  // Web-mode nav: only the folders holding the current page are open; clicking a heading opens/closes it until the next page change
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState("");
+  const [openNav, setOpenNav] = useState<Set<string>>(new Set());
   const [sideView, setSideView] = useState<"tree" | "nav">(store.get("sideView", "tree"));
   const [showSide, setShowSide] = useState(true);
   const [showRight, setShowRight] = useState(true);
@@ -94,9 +104,19 @@ export function App() {
     setSelected(null);
     setDraft(null);
     setMode("preview");
+    if (isPdf(current)) {
+      setContent("");
+      setCommits([]);
+      return;
+    }
     provider.read(current).then(setContent).catch((e) => setContent(`*Could not load: ${e}*`));
     provider.history(current).then(setCommits).catch(() => setCommits([]));
   }, [provider, current]);
+
+  useEffect(() => setOpenNav(ancestorsOf(current)), [current]);
+
+  // <div class="pdf-embed" data-src> placeholders (produced by the markdown renderer) become real PDF viewers
+  const pdfKey = current + "|" + mode + "|" + (selected?.sha ?? "");
 
   useEffect(() => {
     if (!provider || !selected) return;
@@ -130,10 +150,9 @@ export function App() {
     }
   };
   const toggleNav = (p: string) =>
-    setClosedNav((o) => {
+    setOpenNav((o) => {
       const n = new Set(o);
       n.has(p) ? n.delete(p) : n.add(p);
-      store.set("closedNav", [...n]);
       return n;
     });
   const ctxFor = (p: string): RenderCtx | undefined =>
@@ -148,6 +167,17 @@ export function App() {
     store.set("theme", theme);
     store.set("accent", accent);
   }, [theme, accent]);
+  useEffect(() => {
+    document.querySelectorAll<HTMLElement>(".pdf-embed[data-src]").forEach((el) => {
+      if (el.querySelector("iframe")) return;
+      const f = document.createElement("iframe");
+      f.src = el.dataset.src!;
+      f.title = el.dataset.title || "PDF";
+      f.loading = "lazy";
+      el.appendChild(f);
+    });
+  }, [html, splitHtml, pdfKey]);
+
   const { texts, update: updateText } = useNoteTexts(provider, files);
   const index = useNoteIndex(texts, files);
   const myBacklinks = index.backlinks.get(current) ?? [];
@@ -171,6 +201,25 @@ export function App() {
     if (p === current) n.length ? go(n[n.length - 1]) : (location.hash = "");
   };
 
+  const forceSync = async () => {
+    if (!provider || syncing) return;
+    setSyncing(true);
+    setSyncMsg("");
+    try {
+      const r = await syncNow();
+      if (!r.ok) throw new Error(r.error || "sync failed");
+      setFiles(await provider.tree());
+      if (current && !isPdf(current) && draft === null) provider.read(current).then(setContent).catch(() => {});
+      if (current && !isPdf(current)) provider.history(current).then(setCommits).catch(() => {});
+      setSyncMsg(r.changed ? `Synced: ${r.changed} change${r.changed === 1 ? "" : "s"}` : "Already up to date");
+    } catch (e) {
+      setSyncMsg("Sync failed: " + String((e as Error).message ?? e).slice(0, 120));
+    } finally {
+      setSyncing(false);
+      setTimeout(() => setSyncMsg(""), 8000);
+    }
+  };
+
   const dirty = draft !== null && draft !== content;
   const save = async () => {
     if (!provider || !dirty) return;
@@ -186,7 +235,7 @@ export function App() {
     }
   };
 
-  const shown = files.filter((f) => f.toLowerCase().includes(search.toLowerCase()));
+  const shown = navFiles.filter((f) => f.toLowerCase().includes(search.toLowerCase()));
 
   if (err) return <div class="center">Failed to load vault: {err}</div>;
   if (!boot) return <div class="center">Loading…</div>;
@@ -204,8 +253,14 @@ export function App() {
           <button class={layout === "doc" ? "on" : ""} title="Web mode: a wiki-style site, one page at a time" onClick={() => setLayoutPersist("doc")}>Web</button>
           <button class={layout === "vault" ? "on" : ""} title="Obsidian mode: tabs, split view and editor" onClick={() => setLayoutPersist("vault")}>Obsidian</button>
         </div>
-        <Search notes={files} texts={texts} noteTags={index.noteTags} allTags={allTags} onOpen={go} />
+        <Search notes={navFiles} indexTotal={files.length} texts={texts} noteTags={index.noteTags} allTags={allTags} onOpen={go} />
         <span class="grow" />
+        {syncMsg && <span class="sync-msg">{syncMsg}</span>}
+        {boot.cfg.canSync && (
+          <button class="tb-btn" disabled={syncing} title="Pull the latest changes from Fast Note Sync now (it also syncs automatically every minute)" onClick={forceSync}>
+            {syncing ? "Syncing…" : "↻ Sync now"}
+          </button>
+        )}
         {layout === "doc" && (
           <>
             <button class="tb-btn" title="Show or hide the 'On this page' and History panel" onClick={() => setShowRight(!showRight)}>On this page</button>
@@ -282,9 +337,9 @@ export function App() {
           )}
           <div class="scroll">
             {layout === "doc" ? (
-              <NavMenu files={files} closed={closedNav} toggle={toggleNav} current={current} onOpen={go} />
+              <NavMenu files={navFiles} open={openNav} toggle={toggleNav} current={current} onOpen={go} />
             ) : sideView === "tree" ? (
-              <Tree files={files} open={open} toggle={toggle} current={current} onOpen={go} />
+              <Tree files={navFiles} open={open} toggle={toggle} current={current} onOpen={go} />
             ) : (
               shown.map((f) => (
                 <div class={"row file nav" + (f === current ? " active" : "")} onClick={() => go(f)}>
@@ -313,6 +368,10 @@ export function App() {
             <div class="toolbar">
               <span class="crumb">{layout === "doc" ? current.replace(/\.md$/, "").split("/").join(" › ") : current}</span>
               <span class="grow" />
+              {isPdf(current) ? (
+                <a class="tb-link" href={boot.provider.assetUrl(current)} target="_blank" rel="noopener" title="Open this PDF in its own browser tab">Open in new tab</a>
+              ) : (
+                <>
               {status && <span class="status">{status}</span>}
               {mode === "edit" && boot.provider.canWrite && (
                 <button disabled={!dirty} title="Save and commit this note (Ctrl/Cmd+S)" onClick={save}>Save</button>
@@ -337,6 +396,8 @@ export function App() {
                   {mode === "edit" ? "Preview" : "Edit"}
                 </button>
               )}
+                </>
+              )}
             </div>
             <div class="panes">
             <div class="pane scroll doc">
@@ -345,7 +406,9 @@ export function App() {
                   Viewing {selected.sha.slice(0, 7)} ({new Date(selected.date).toLocaleString()}) · <a onClick={() => setSelected(null)}>back to current</a>
                 </div>
               )}
-              {mode === "raw" ? (
+              {isPdf(current) ? (
+                <iframe class="pdf-page" src={boot.provider.assetUrl(current)} title={current} />
+              ) : mode === "raw" ? (
                 <pre class="raw">{shownRaw}</pre>
               ) : mode === "edit" && !selected ? (
                 <div class="edit-split">
@@ -368,7 +431,7 @@ export function App() {
                   <span class="crumb">{split}</span>
                   <span class="grow" />
                   <select value={split} onChange={(e) => setSplit((e.target as HTMLSelectElement).value)}>
-                    {files.map((f) => <option value={f}>{f}</option>)}
+                    {navFiles.filter((f) => !isPdf(f)).map((f) => <option value={f}>{f}</option>)}
                   </select>
                   <button onClick={() => go(split)} title="Open in main pane">↤</button>
                   <button onClick={() => setSplit(null)} title="Close split">×</button>

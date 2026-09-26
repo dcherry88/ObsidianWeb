@@ -96,8 +96,16 @@ export class FnsBackend implements Backend {
     }
   }
 
-  async syncOnce(): Promise<void> {
-    if (this.status.running) return;
+  private inflight?: Promise<void>;
+
+  /** Run a sync, or wait for the one already running. */
+  syncOnce(): Promise<void> {
+    return (this.inflight ??= this.doSync().finally(() => {
+      this.inflight = undefined;
+    }));
+  }
+
+  private async doSync(): Promise<void> {
     this.status = { ...this.status, running: true, lastStart: new Date().toISOString() };
     try {
       const state = await this.loadState();

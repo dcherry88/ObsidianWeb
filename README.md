@@ -245,6 +245,10 @@ Ideas to revisit, not commitments.
   - Connection data such as tokens must be **stored encrypted**, so it can't be scraped from the Docker data volume.
 - **OIDC role support.** Today every signed-in user has the same access. Admin would be the base level, with custom role names configurable.
   - Set FNS vault access **per connection by role**.
+- **Editing on the hosted site.** Today the server is read-only when it uses FNS.
+  - Create folders and pages.
+  - Modify raw markdown.
+  - Sync changes back to FNS, as long as the token's permissions allow it (the token would need write access to notes and attachments).
 
 ## Contributing
 Issues and PRs are welcome. `npm run typecheck` checks the app and server.

@@ -1,25 +1,46 @@
-import { useEffect, useMemo, useState } from "preact/hooks";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { VaultProvider } from "../../shared/types";
 import { resolveLink } from "./md";
 
 /** Loads every note's text once (8 at a time) so search, backlinks and tags can work client-side. */
 export function useNoteTexts(provider: VaultProvider | undefined, notes: string[]) {
   const [texts, setTexts] = useState<Map<string, string>>(new Map());
+  const loaded = useRef(new Set<string>());
+  // tree refreshes (e.g. after a save) produce a new array identity; key on contents so we only
+  // fetch notes we haven't loaded yet instead of re-downloading the whole vault.
+  const key = notes.join("\0");
   useEffect(() => {
     if (!provider || !notes.length) return;
+    const alive = new Set(notes);
+    let pruned = false;
+    for (const k of loaded.current) if (!alive.has(k)) (loaded.current.delete(k), (pruned = true));
+    if (pruned) setTexts((m) => {
+      const next = new Map(m);
+      for (const k of next.keys()) if (!alive.has(k)) next.delete(k);
+      return next;
+    });
+    const missing = notes.filter((n) => !loaded.current.has(n));
+    if (!missing.length) return;
     let cancelled = false;
     (async () => {
-      const next = new Map<string, string>();
-      for (let i = 0; i < notes.length; i += 8) {
-        await Promise.all(notes.slice(i, i + 8).map((n) => provider.read(n).then((t) => next.set(n, t)).catch(() => next.set(n, ""))));
+      for (let i = 0; i < missing.length; i += 8) {
+        const batch = await Promise.all(
+          missing.slice(i, i + 8).map((n) => provider.read(n).then((t) => [n, t] as const).catch(() => [n, ""] as const)),
+        );
         if (cancelled) return;
-        setTexts(new Map(next));
+        for (const [n] of batch) loaded.current.add(n);
+        setTexts((prev) => {
+          const next = new Map(prev);
+          for (const [n, t] of batch) next.set(n, t);
+          return next;
+        });
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [provider, notes]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [provider, key]);
   const update = (path: string, text: string) => setTexts((m) => new Map(m).set(path, text));
   return { texts, update };
 }

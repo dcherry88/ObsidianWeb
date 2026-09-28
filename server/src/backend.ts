@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { readdir, readFile, writeFile, mkdir, rename, rm, stat } from "node:fs/promises";
+import { lstat, readdir, readFile, writeFile, mkdir, rename, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import type { Commit } from "../../shared/types";
 import { textHash } from "../../shared/hash";
@@ -92,6 +92,12 @@ export function safePath(root: string, rel: string): string {
   return abs;
 }
 
+/** Refuse symlinks: safePath is lexical, so without this a vault containing a symlink could serve files outside the vault. */
+export async function noSymlink(abs: string): Promise<void> {
+  const st = await lstat(abs).catch(() => undefined);
+  if (st?.isSymbolicLink()) throw new Error("bad path");
+}
+
 /** Vault is a folder inside a git repository: history and writes come from git. */
 export class GitBackend implements Backend {
   constructor(
@@ -110,7 +116,11 @@ export class GitBackend implements Backend {
       .sort((a, b) => a.localeCompare(b));
   }
 
-  read = (rel: string) => readFile(safePath(this.root, rel));
+  read = async (rel: string) => {
+    const abs = safePath(this.root, rel);
+    await noSymlink(abs);
+    return readFile(abs);
+  };
 
   async history(rel: string): Promise<Commit[]> {
     safePath(this.root, rel);
@@ -144,6 +154,7 @@ export class GitBackend implements Backend {
 
   async write(rel: string, content: string, o: WriteOpts = {}) {
     const abs = safePath(this.root, rel);
+    await noSymlink(abs);
     let existing: string | undefined;
     try {
       existing = await readFile(abs, "utf8");
@@ -199,6 +210,7 @@ export class GitBackend implements Backend {
 
   async upload(rel: string, data: Buffer, actor?: Actor) {
     const abs = safePath(this.root, rel);
+    await noSymlink(abs);
     await mkdir(path.dirname(abs), { recursive: true });
     await writeFile(abs, data);
     await this.git("add", "--", rel);
@@ -207,7 +219,11 @@ export class GitBackend implements Backend {
 
   async removeDir(rel: string) {
     const abs = safePath(this.root, rel);
-    if ((await readdir(abs).catch(() => ["x"])).length) throw new NotEmptyError();
+    const entries = await readdir(abs).catch((e) => {
+      if ((e as NodeJS.ErrnoException)?.code === "ENOENT") throw new NotFoundError();
+      return ["x"]; // unreadable: fail closed as "not empty"
+    });
+    if (entries.length) throw new NotEmptyError();
     await rm(abs, { recursive: true, force: true });
   }
 }
@@ -216,6 +232,7 @@ export class GitBackend implements Backend {
 export async function walk(root: string, dir = "", dirs = false): Promise<string[]> {
   const out: string[] = [];
   for (const e of await readdir(path.join(root, dir), { withFileTypes: true })) {
+    if (e.isSymbolicLink()) continue; // never follow links out of the vault
     const rel = dir ? `${dir}/${e.name}` : e.name;
     if (HIDDEN.test(rel)) continue;
     if (e.isDirectory()) {

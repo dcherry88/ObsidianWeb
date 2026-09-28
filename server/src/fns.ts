@@ -5,7 +5,7 @@ import { mkdir, readFile, readdir, rename as fsRename, rm, stat, utimes, writeFi
 import path from "node:path";
 import type { Commit } from "../../shared/types";
 import { textHash } from "../../shared/hash";
-import { type Actor, type Backend, ConflictError, ExistsError, NotEmptyError, NotFoundError, type WriteOpts, safePath, walk } from "./backend";
+import { type Actor, type Backend, ConflictError, ExistsError, NotEmptyError, NotFoundError, type WriteOpts, noSymlink, safePath, walk } from "./backend";
 
 export interface FnsOptions {
   url: string;
@@ -81,7 +81,7 @@ export class FnsBackend implements Backend {
   private fetchRaw(p: string, query: Record<string, string | number | boolean | undefined>) {
     const u = new URL(this.o.url.replace(/\/$/, "") + p);
     for (const [k, v] of Object.entries(query)) if (v !== undefined) u.searchParams.set(k, String(v));
-    return fetch(u, { headers: this.headers() });
+    return fetch(u, { headers: this.headers(), signal: AbortSignal.timeout(30_000) });
   }
 
   private async api<T>(p: string, query: Record<string, string | number | boolean | undefined>, init?: { method: string; body?: unknown; form?: FormData; actor?: Actor }): Promise<T> {
@@ -91,6 +91,7 @@ export class FnsBackend implements Backend {
       method: init?.method ?? "GET",
       headers: this.headers(init?.actor, init?.body !== undefined), // multipart sets its own content type
       body: init?.form ?? (init?.body !== undefined ? JSON.stringify(init.body) : undefined),
+      signal: AbortSignal.timeout(30_000),
     });
     if (!res.ok) throw new Error(`${p}: HTTP ${res.status}`);
     const j = (await res.json()) as { code?: number; status?: boolean; message?: string; data?: T };
@@ -216,7 +217,11 @@ export class FnsBackend implements Backend {
 
   // ---------- Backend ----------
   tree = () => walk(this.o.mirrorDir, "", true).then((f) => f.sort((a, b) => a.localeCompare(b)));
-  read = (rel: string) => readFile(safePath(this.o.mirrorDir, rel));
+  read = async (rel: string) => {
+    const abs = safePath(this.o.mirrorDir, rel);
+    await noSymlink(abs);
+    return readFile(abs);
+  };
 
   async history(rel: string): Promise<Commit[]> {
     safePath(this.o.mirrorDir, rel);
@@ -262,6 +267,7 @@ export class FnsBackend implements Backend {
   async write(rel: string, content: string, o: WriteOpts = {}) {
     if (!this.canWrite) throw new Error("writes disabled");
     const abs = safePath(this.o.mirrorDir, rel);
+    await noSymlink(abs);
     await this.settled();
     const live = await this.liveNote(rel); // ask FNS itself, not our copy, so a change made a second ago is caught
     if (o.createOnly && live !== undefined) throw new ExistsError();
@@ -314,7 +320,11 @@ export class FnsBackend implements Backend {
   async removeDir(rel: string, actor?: Actor) {
     if (!this.canWrite) throw new Error("writes disabled");
     const abs = safePath(this.o.mirrorDir, rel);
-    if ((await readdir(abs).catch(() => ["x"])).length) throw new NotEmptyError();
+    const entries = await readdir(abs).catch((e) => {
+      if ((e as NodeJS.ErrnoException)?.code === "ENOENT") throw new NotFoundError();
+      return ["x"]; // unreadable: fail closed as "not empty"
+    });
+    if (entries.length) throw new NotEmptyError();
     await this.api("/api/folder", {}, { method: "DELETE", actor, body: { vault: this.o.vault, path: rel } });
     await rm(abs, { recursive: true, force: true });
   }
@@ -322,6 +332,7 @@ export class FnsBackend implements Backend {
   async upload(rel: string, data: Buffer, actor?: Actor) {
     if (!this.canWrite) throw new Error("writes disabled");
     const abs = safePath(this.o.mirrorDir, rel);
+    await noSymlink(abs);
     await this.settled();
     const now = String(Date.now());
     const form = new FormData();

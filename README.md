@@ -166,6 +166,9 @@ Notes for containers:
 
 ### Running behind a reverse proxy
 Any proxy (Caddy, nginx, Traefik) works: forward everything to port 8787. Enable HTTPS at the proxy.
+Recommended at the proxy (the app only sets `nosniff`/`referrer-policy`/`frame-options` itself):
+`Strict-Transport-Security`, a `Content-Security-Policy` for the app shell, per-IP rate limits on
+`/api/*` and `/auth/*`, and a request-body cap (~3 MB) to match the server's 2 MB note limit.
 
 ### Security
 By default there is **no authentication**: anyone who can reach the server can read the vault (and, with `ALLOW_WRITE`, change it). For anything private, either enable OIDC login (below) or keep the server on a private network / behind an authenticating proxy. Leave `ALLOW_WRITE` off unless the endpoint is protected.
@@ -173,7 +176,7 @@ By default there is **no authentication**: anyone who can reach the server can r
 ---
 
 ## Login with OIDC
-Set `OIDC_ISSUER` and the server requires sign-in for everything except `/healthz`. It uses the authorization-code flow with PKCE, so it works with Pocket ID, Entra ID, Authentik, Keycloak and other standard providers. **Every user who can sign in gets the same access** (no roles yet).
+Set `OIDC_ISSUER` and the server requires sign-in for everything except `/healthz`. It uses the authorization-code flow with PKCE, so it works with Pocket ID, Entra ID, Authentik, Keycloak and other standard providers. **Every user who can sign in gets the same access.** To restrict who may sign in, set `OIDC_ALLOWED_EMAILS` and/or `OIDC_ALLOWED_GROUPS` (matched against the ID token's groups/roles claims) — and still restrict who can create accounts at the provider, since the allowlist is a second gate, not a replacement.
 
 1. In your identity provider, register a client for ObsidianWeb with the redirect/callback URL `https://<your host>/auth/callback` (exactly `PUBLIC_URL` + `/auth/callback`).
 2. Set the environment variables:
@@ -186,7 +189,9 @@ Set `OIDC_ISSUER` and the server requires sign-in for everything except `/health
 | `PUBLIC_URL` | The URL users open, e.g. `https://notes.example.com`. Used for the callback URL and the `Secure` cookie flag |
 | `OIDC_SCOPES` | Default `openid profile email` |
 | `SESSION_TTL_HOURS` | Default `168` (7 days) |
-| `OIDC_ALLOW_INSECURE` | `1` to allow a plain-HTTP issuer (local testing only) |
+| `OIDC_ALLOWED_EMAILS` | Optional comma-separated emails that may sign in |
+| `OIDC_ALLOWED_GROUPS` | Optional comma-separated group names (ID token groups/roles claims) that may sign in |
+| `OIDC_ALLOW_INSECURE` | `1` to allow a plain-HTTP issuer (local testing only; refused when `PUBLIC_URL` is https) |
 
 Sessions are saved to `DATA_DIR/sessions.json` (mode 600, `/data` in Docker), so restarts and redeploys don't sign anyone out as long as that folder persists. Only a hash of each session ID is stored, so a copy of the file can't be used to impersonate a user. Deleting the file signs everyone out. Sign out is in **Settings**. Behind a reverse proxy, forward everything to the container and make sure `PUBLIC_URL` is the public HTTPS address.
 

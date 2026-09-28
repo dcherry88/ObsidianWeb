@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { splitFrontmatter } from "./md";
 
 interface Hit {
@@ -66,6 +66,13 @@ export function Search({
   const textTerm = tokens.filter((t) => !t.startsWith("#")).join(" ");
   const active = tagTerms.length > 0 || textTerm.length > 0;
 
+  // Lowercased bodies computed once per index update, not once per note per keystroke.
+  const lowerBodies = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const [p, t] of texts) m.set(p, splitFrontmatter(t).body.toLowerCase());
+    return m;
+  }, [texts]);
+
   // tag suggestions while typing the last token as "#par..."
   const last = tokens[tokens.length - 1] ?? "";
   const partial = q.endsWith(" ") ? "" : last.startsWith("#") ? last.slice(1) : null;
@@ -88,13 +95,13 @@ export function Search({
       let snippet = "";
       if (textTerm) {
         const name = title(n).toLowerCase();
-        const body = splitFrontmatter(texts.get(n) ?? "").body;
-        const at = body.toLowerCase().indexOf(textTerm);
+        const lowerBody = lowerBodies.get(n) ?? "";
+        const at = lowerBody.indexOf(textTerm);
         const nameHit = name.includes(textTerm) || n.toLowerCase().includes(textTerm);
         const tagHit = tags.some((t) => t.includes(textTerm));
         if (!nameHit && at < 0 && !tagHit) continue;
         score = name === textTerm ? 0 : name.startsWith(textTerm) ? 1 : nameHit ? 2 : tagHit ? 3 : 4;
-        if (at >= 0) snippet = (at > 40 ? "…" : "") + body.slice(Math.max(0, at - 40), at + 80).replace(/\s+/g, " ");
+        if (at >= 0) snippet = (at > 40 ? "…" : "") + splitFrontmatter(texts.get(n) ?? "").body.slice(Math.max(0, at - 40), at + 80).replace(/\s+/g, " ");
       }
       hits.push({ path: n, snippet, score });
     }

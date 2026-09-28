@@ -130,99 +130,111 @@ function renderSectionGrid(rows: Map<number, string>[], render: (t: string) => s
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 
+interface MdEnv {
+  files: string[];
+  ctx?: RenderCtx;
+}
+
+// One shared parser: building it (rules, highlighter) per render wasted most of the cost of
+// every keystroke's live preview. Per-render data travels via md.render(src, env).
+const md = new MarkdownIt({
+  linkify: true,
+  highlight: (code, lang) => {
+    const l = lang && hljs.getLanguage(lang) ? lang : "";
+    try {
+      return l ? hljs.highlight(code, { language: l }).value : esc(code);
+    } catch {
+      return esc(code);
+    }
+  },
+});
+
+// [[wikilinks]] and [[target|alias]]
+md.inline.ruler.before("link", "wikilink", (state, silent) => {
+  const { src, pos } = state;
+  if (src.charCodeAt(pos) !== 0x5b || src.charCodeAt(pos + 1) !== 0x5b) return false;
+  const end = src.indexOf("]]", pos + 2);
+  if (end < 0) return false;
+  if (!silent) {
+    const [target, alias] = src.slice(pos + 2, end).split("|");
+    const tok = state.push("wikilink", "", 0);
+    tok.meta = { target: target.trim(), alias: (alias ?? target).trim() };
+  }
+  state.pos = end + 2;
+  return true;
+});
+md.renderer.rules.wikilink = (tokens, i, _opts, env) => {
+  const { target, alias } = tokens[i].meta;
+  const { files, ctx } = env as MdEnv;
+  if (PDF.test(target) && ctx) {
+    const pdfHit = resolveAsset(ctx, target);
+    if (pdfHit) return `<a class="wikilink" href="#/${pdfHit.split("/").map(encodeURIComponent).join("/")}">${esc(alias)}</a>`;
+  }
+  const hit = resolveLink(files, target);
+  return hit
+    ? `<a class="wikilink" href="#/${hit.split("/").map(encodeURIComponent).join("/")}">${esc(alias)}</a>`
+    : `<span class="wikilink unresolved" title="Not found">${esc(alias)}</span>`;
+};
+
+// ![[embed]] : images render inline; other files become links
+md.inline.ruler.before("image", "embed", (state, silent) => {
+  const { src, pos } = state;
+  if (src.charCodeAt(pos) !== 0x21 || !src.startsWith("[[", pos + 1)) return false;
+  const end = src.indexOf("]]", pos + 3);
+  if (end < 0) return false;
+  if (!silent) {
+    const [target, size] = src.slice(pos + 3, end).split("|");
+    const tok = state.push("embed", "", 0);
+    tok.meta = { target: target.trim(), size: (size ?? "").trim() };
+  }
+  state.pos = end + 2;
+  return true;
+});
+md.renderer.rules.embed = (tokens, i, _opts, env) => {
+  const { target, size } = tokens[i].meta;
+  const { files, ctx } = env as MdEnv;
+  if (IMG.test(target)) {
+    const hit = ctx && resolveAsset(ctx, target);
+    if (!hit) return `<span class="wikilink unresolved" title="Image not found">${esc(target)}</span>`;
+    const w = /^\d+$/.test(size) ? ` width="${size}"` : "";
+    return `<img src="${esc(ctx!.assetUrl(hit))}" alt="${esc(target)}"${w}>`;
+  }
+  if (PDF.test(target)) {
+    const hit = ctx && resolveAsset(ctx, target);
+    if (!hit) return `<span class="wikilink unresolved" title="PDF not found">${esc(target)}</span>`;
+    const page = /#page=(\d+)/i.exec(target)?.[1];
+    const src = ctx!.assetUrl(hit) + (page ? `#page=${page}` : "");
+    const h = /^\d+$/.test(size) ? ` style="height:${Math.min(parseInt(size, 10), 2000)}px"` : "";
+    return `<div class="pdf-embed" data-src="${esc(src)}" data-title="${esc(hit)}"${h}><a href="${esc(ctx!.assetUrl(hit))}" target="_blank" rel="noopener">${esc(hit)}</a></div>`;
+  }
+  const note = resolveLink(files, target);
+  if (note) return `<a class="wikilink" href="#/${note.split("/").map(encodeURIComponent).join("/")}">${esc(target)}</a>`;
+  const asset = ctx && resolveAsset(ctx, target);
+  return asset ? `<a href="${esc(ctx!.assetUrl(asset))}" target="_blank" rel="noopener">${esc(target)}</a>` : `<span class="wikilink unresolved">${esc(target)}</span>`;
+};
+
+// standard ![alt](path) images: resolve relative paths against the vault
+const defaultImage = md.renderer.rules.image!;
+md.renderer.rules.image = (tokens, i, opts, env, self) => {
+  const e = env as MdEnv;
+  const src = tokens[i].attrGet("src") ?? "";
+  const hit = e.ctx && resolveAsset(e.ctx, src);
+  if (hit) tokens[i].attrSet("src", e.ctx!.assetUrl(hit));
+  return defaultImage(tokens, i, opts, env, self);
+};
+
+// heading ids for outline navigation
+const defaultHeading = md.renderer.rules.heading_open;
+md.renderer.rules.heading_open = (tokens, i, opts, env, self) => {
+  tokens[i].attrSet("id", slug(tokens[i + 1].content));
+  return defaultHeading ? defaultHeading(tokens, i, opts, env, self) : self.renderToken(tokens, i, opts);
+};
+
 export function renderMarkdown(src: string, files: string[], ctx?: RenderCtx): string {
-  const md = new MarkdownIt({
-    linkify: true,
-    highlight: (code, lang) => {
-      const l = lang && hljs.getLanguage(lang) ? lang : "";
-      try {
-        return l ? hljs.highlight(code, { language: l }).value : esc(code);
-      } catch {
-        return esc(code);
-      }
-    },
-  });
-
-  // [[wikilinks]] and [[target|alias]]
-  md.inline.ruler.before("link", "wikilink", (state, silent) => {
-    const { src, pos } = state;
-    if (src.charCodeAt(pos) !== 0x5b || src.charCodeAt(pos + 1) !== 0x5b) return false;
-    const end = src.indexOf("]]", pos + 2);
-    if (end < 0) return false;
-    if (!silent) {
-      const [target, alias] = src.slice(pos + 2, end).split("|");
-      const tok = state.push("wikilink", "", 0);
-      tok.meta = { target: target.trim(), alias: (alias ?? target).trim() };
-    }
-    state.pos = end + 2;
-    return true;
-  });
-  md.renderer.rules.wikilink = (tokens, i) => {
-    const { target, alias } = tokens[i].meta;
-    if (PDF.test(target) && ctx) {
-      const pdfHit = resolveAsset(ctx, target);
-      if (pdfHit) return `<a class="wikilink" href="#/${pdfHit.split("/").map(encodeURIComponent).join("/")}">${esc(alias)}</a>`;
-    }
-    const hit = resolveLink(files, target);
-    return hit
-      ? `<a class="wikilink" href="#/${hit.split("/").map(encodeURIComponent).join("/")}">${esc(alias)}</a>`
-      : `<span class="wikilink unresolved" title="Not found">${esc(alias)}</span>`;
-  };
-
-  // ![[embed]] : images render inline; other files become links
-  md.inline.ruler.before("image", "embed", (state, silent) => {
-    const { src, pos } = state;
-    if (src.charCodeAt(pos) !== 0x21 || !src.startsWith("[[", pos + 1)) return false;
-    const end = src.indexOf("]]", pos + 3);
-    if (end < 0) return false;
-    if (!silent) {
-      const [target, size] = src.slice(pos + 3, end).split("|");
-      const tok = state.push("embed", "", 0);
-      tok.meta = { target: target.trim(), size: (size ?? "").trim() };
-    }
-    state.pos = end + 2;
-    return true;
-  });
-  md.renderer.rules.embed = (tokens, i) => {
-    const { target, size } = tokens[i].meta;
-    if (IMG.test(target)) {
-      const hit = ctx && resolveAsset(ctx, target);
-      if (!hit) return `<span class="wikilink unresolved" title="Image not found">${esc(target)}</span>`;
-      const w = /^\d+$/.test(size) ? ` width="${size}"` : "";
-      return `<img src="${esc(ctx!.assetUrl(hit))}" alt="${esc(target)}"${w}>`;
-    }
-    if (PDF.test(target)) {
-      const hit = ctx && resolveAsset(ctx, target);
-      if (!hit) return `<span class="wikilink unresolved" title="PDF not found">${esc(target)}</span>`;
-      const page = /#page=(\d+)/i.exec(target)?.[1];
-      const src = ctx!.assetUrl(hit) + (page ? `#page=${page}` : "");
-      const h = /^\d+$/.test(size) ? ` style="height:${Math.min(parseInt(size, 10), 2000)}px"` : "";
-      return `<div class="pdf-embed" data-src="${esc(src)}" data-title="${esc(hit)}"${h}><a href="${esc(ctx!.assetUrl(hit))}" target="_blank" rel="noopener">${esc(hit)}</a></div>`;
-    }
-    const note = resolveLink(files, target);
-    if (note) return `<a class="wikilink" href="#/${note.split("/").map(encodeURIComponent).join("/")}">${esc(target)}</a>`;
-    const asset = ctx && resolveAsset(ctx, target);
-    return asset ? `<a href="${esc(ctx!.assetUrl(asset))}" target="_blank" rel="noopener">${esc(target)}</a>` : `<span class="wikilink unresolved">${esc(target)}</span>`;
-  };
-
-  // standard ![alt](path) images: resolve relative paths against the vault
-  const defaultImage = md.renderer.rules.image!;
-  md.renderer.rules.image = (tokens, i, opts, env, self) => {
-    const src = tokens[i].attrGet("src") ?? "";
-    const hit = ctx && resolveAsset(ctx, src);
-    if (hit) tokens[i].attrSet("src", ctx!.assetUrl(hit));
-    return defaultImage(tokens, i, opts, env, self);
-  };
-
-  // heading ids for outline navigation
-  const defaultHeading = md.renderer.rules.heading_open;
-  md.renderer.rules.heading_open = (tokens, i, opts, env, self) => {
-    tokens[i].attrSet("id", slug(tokens[i + 1].content));
-    return defaultHeading ? defaultHeading(tokens, i, opts, env, self) : self.renderToken(tokens, i, opts);
-  };
-
+  const env: MdEnv = { files, ctx };
+  const render = (t: string) => md.render(t, env);
   let html = splitSections(splitFrontmatter(src).body)
-    .map((seg) => (seg.type === "md" ? md.render(seg.text) : renderSectionGrid(seg.rows, (t) => md.render(t))))
+    .map((seg) => (seg.type === "md" ? render(seg.text) : renderSectionGrid(seg.rows, render)))
     .join("");
 
   // Obsidian extras applied on rendered HTML (skipping code blocks)

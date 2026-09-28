@@ -2,10 +2,12 @@ import type { AppConfig, Commit, VaultProvider, WriteOptions } from "../../share
 
 const enc = (p: string) => p.split("/").map(encodeURIComponent).join("/");
 
+const loginNext = () => encodeURIComponent(location.pathname + location.hash);
+
 async function ok(r: Response): Promise<Response> {
-  // session expired (server mode with OIDC): go sign in again
+  // session expired (server mode with OIDC): go sign in again, keeping the deep link
   if (r.status === 401) {
-    location.assign("./auth/login?next=" + encodeURIComponent(location.pathname));
+    location.assign("./auth/login?next=" + loginNext());
     throw new Error("Signing in…");
   }
   if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
@@ -37,7 +39,7 @@ async function mutate(method: string, url: string, body?: unknown): Promise<void
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   if (r.status === 401) {
-    location.assign("./auth/login?next=" + encodeURIComponent(location.pathname));
+    location.assign("./auth/login?next=" + loginNext());
     throw new Error("Signing in…");
   }
   if (r.ok) return;
@@ -74,7 +76,7 @@ export class ApiProvider implements VaultProvider {
     form.set("file", file, file.name || "image.png");
     const r = await fetch("./api/upload", { method: "POST", body: form });
     if (r.status === 401) {
-      location.assign("./auth/login?next=" + encodeURIComponent(location.pathname));
+      location.assign("./auth/login?next=" + loginNext());
       throw new Error("Signing in…");
     }
     const j = await r.json().catch(() => ({}) as any);
@@ -84,6 +86,8 @@ export class ApiProvider implements VaultProvider {
 }
 
 /** GitHub Pages: vault files + index.json are copied into the site at build time; history comes from the GitHub API. */
+// History is cached per path for the session (unauthenticated API quota is 60 req/hr/IP).
+const historyCache = new Map<string, Commit[]>();
 export class StaticProvider implements VaultProvider {
   canWrite = false;
   constructor(private cfg: AppConfig) {}
@@ -100,18 +104,22 @@ export class StaticProvider implements VaultProvider {
     return (await ok(await fetch(url))).text();
   };
   history = async (path: string) => {
+    const cached = historyCache.get(path);
+    if (cached) return cached;
     const q = new URLSearchParams({
       path: this.repoPath(path),
       sha: this.cfg.branch ?? "main",
       per_page: "50",
     });
     const rows = (await (await ok(await fetch(`https://api.github.com/repos/${this.cfg.repo}/commits?${q}`))).json()) as any[];
-    return rows.map((r) => ({
+    const commits = rows.map((r) => ({
       sha: r.sha,
       author: r.commit.author.name,
       date: r.commit.author.date,
       message: r.commit.message.split("\n")[0],
     }));
+    historyCache.set(path, commits);
+    return commits;
   };
   write = async () => {
     throw new Error("read-only in static mode");
@@ -135,7 +143,7 @@ export async function loadProvider(): Promise<{ cfg: AppConfig; provider: VaultP
   let cfg: AppConfig = { mode: "server", canWrite: false };
   try {
     const r = await fetch("./config.json");
-    if (r.status === 401) location.assign("./auth/login?next=" + encodeURIComponent(location.pathname));
+    if (r.status === 401) location.assign("./auth/login?next=" + loginNext());
     else if (r.ok) cfg = await r.json();
   } catch {
     /* dev server without config: assume server mode */

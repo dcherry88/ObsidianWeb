@@ -26,6 +26,9 @@ export interface AuthEnv {
   OIDC_CLIENT_SECRET?: string;
   OIDC_SCOPES?: string;
   OIDC_ALLOW_INSECURE?: string;
+  /** restricts who may sign in: comma-separated emails and/or group names (compared against the ID token's groups/roles claims) */
+  OIDC_ALLOWED_EMAILS?: string;
+  OIDC_ALLOWED_GROUPS?: string;
   PUBLIC_URL?: string;
   SESSION_TTL_HOURS?: string;
 }
@@ -47,6 +50,30 @@ export function setupAuth(app: Hono, env: AuthEnv, sessionFile?: string): Auth {
   const scope = env.OIDC_SCOPES ?? "openid profile email";
   const ttlMs = Number(env.SESSION_TTL_HOURS ?? 168) * 3600_000;
   const insecure = ["1", "true"].includes(env.OIDC_ALLOW_INSECURE ?? "");
+  // Local-dev-only escape hatch: never allow cleartext IdP traffic in production.
+  if (insecure && publicUrl.startsWith("https://")) {
+    throw new Error("OIDC_ALLOW_INSECURE must not be set when PUBLIC_URL is https (local development only)");
+  }
+  // Optional allowlist: when set, only these emails / groups may sign in. The IdP must still
+  // restrict who can create accounts; this is a second gate, not a replacement.
+  const allowedEmails = new Set(
+    (env.OIDC_ALLOWED_EMAILS ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
+  );
+  const allowedGroups = new Set(
+    (env.OIDC_ALLOWED_GROUPS ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
+  );
+  const claimGroups = (claims: Record<string, unknown>): string[] => {
+    const raw: unknown[] = [];
+    for (const k of ["groups", "roles", "groups_claim", "realm_access"]) {
+      const v = claims[k];
+      if (Array.isArray(v)) raw.push(...v);
+      else if (typeof v === "string") raw.push(...v.split(/[,\s]+/));
+      else if (v && typeof v === "object" && Array.isArray((v as Record<string, unknown>).roles)) {
+        raw.push(...((v as Record<string, unknown>).roles as unknown[]));
+      }
+    }
+    return raw.map((g) => String(g).toLowerCase()).filter(Boolean);
+  };
 
   // Sessions are keyed by a hash of the cookie value and saved to disk, so a restart or redeploy doesn't sign everyone out.
   // Only the hash is stored: a copy of the data file can't be used to impersonate anyone.
@@ -143,6 +170,18 @@ export function setupAuth(app: Hono, env: AuthEnv, sessionFile?: string): Auth {
       const tokens = await oidc.authorizationCodeGrant(conf, current, { pkceCodeVerifier: p.verifier, expectedState: state });
       const claims = tokens.claims();
       if (!claims) throw new Error("no ID token returned");
+      const email = claims.email as string | undefined;
+      if (allowedEmails.size && (!email || !allowedEmails.has(email.toLowerCase()))) {
+        console.warn("[auth] sign-in refused: email not allowlisted");
+        return c.text("Sign-in is not permitted for this account.", 403);
+      }
+      if (allowedGroups.size) {
+        const mine = new Set(claimGroups(claims as unknown as Record<string, unknown>));
+        if (![...allowedGroups].some((g) => mine.has(g))) {
+          console.warn("[auth] sign-in refused: no allowlisted group");
+          return c.text("Sign-in is not permitted for this account.", 403);
+        }
+      }
       const sid = rid();
       sessions.set(hashId(sid), {
         user: {
@@ -164,7 +203,7 @@ export function setupAuth(app: Hono, env: AuthEnv, sessionFile?: string): Auth {
   app.get("/auth/logout", (c) => {
     const sid = getCookie(c, COOKIE);
     if (sid && sessions.delete(hashId(sid))) persist();
-    deleteCookie(c, COOKIE, { path: "/" });
+    deleteCookie(c, COOKIE, { path: "/", secure, sameSite: "Lax" });
     return c.html('<!doctype html><meta charset="utf-8"><title>Signed out</title><body style="font-family:system-ui;display:grid;place-items:center;height:100vh"><div>You are signed out. <a href="/auth/login">Sign in again</a></div>');
   });
 

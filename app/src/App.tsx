@@ -920,7 +920,7 @@ export function App() {
               <label class="dlg-field">New path for <b>{dlg.target}</b> (change the parent to move it)
                 <input type="text" ref={focusAndSelect} value={dlg.value ?? ""} onInput={(e) => setDlg({ ...dlg, value: (e.target as HTMLInputElement).value })} />
               </label>
-              <div class="muted small">Every page and attachment inside moves with it. Links by page name keep working; links written with a full path do not.</div>
+              <div class="muted small">Every page and attachment inside moves with it. Links by page name keep working; links written with a full path do not. On synced vaults the move is applied item by item, so an interruption can leave part of the folder moved.</div>
             </>
           )}
           {dlg.kind === "delete" && (

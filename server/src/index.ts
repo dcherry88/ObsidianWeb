@@ -45,6 +45,17 @@ if (SOURCE === "fns") {
 
 const app = new Hono();
 const auth = setupAuth(app, env, path.join(DATA_DIR, "sessions.json")); // no-op unless OIDC_ISSUER is set
+if (!auth.enabled) {
+  console.warn("[auth] OIDC is disabled: the vault API is open to anyone who can reach this server. Bind to localhost or put authentication in front in production.");
+}
+
+// Baseline hardening headers (CSP for the app shell lives at the reverse proxy; these are safe defaults here).
+app.use("*", async (c, next) => {
+  await next();
+  c.header("x-content-type-options", "nosniff");
+  c.header("referrer-policy", "no-referrer");
+  c.header("x-frame-options", "SAMEORIGIN");
+});
 
 app.get("/healthz", (c) => c.text("ok"));
 
@@ -98,11 +109,12 @@ app.get("/api/history", async (c) => {
 
 // ---- editing: create / edit / rename / delete (needs ALLOW_WRITE=1; FNS mode also needs a token that may write) ----
 const MAX_NOTE_BYTES = 2 * 1024 * 1024;
+// Hono buffers the whole JSON body before we see it, so refuse oversized payloads before parsing.
+const MAX_JSON_BYTES = MAX_NOTE_BYTES + 64 * 1024;
 const publicOrigin = env.PUBLIC_URL ? new URL(env.PUBLIC_URL).origin : undefined;
 
-/** Refuse when editing is off or the request comes from another site (cookies alone must not authorise a write). */
-function writeGuard(c: Context): Response | undefined {
-  if (!backend.canWrite) return c.text("editing is disabled on this server", 403);
+/** Refuse when the request comes from another site (cookies alone must not authorise a state change). */
+function csrfGuard(c: Context): Response | undefined {
   const origin = c.req.header("origin");
   if (origin) {
     let ok = origin === publicOrigin;
@@ -114,6 +126,12 @@ function writeGuard(c: Context): Response | undefined {
     if (!ok) return c.text("cross-site request refused", 403);
   }
   return undefined;
+}
+
+/** Refuse when editing is off or the request comes from another site (cookies alone must not authorise a write). */
+function writeGuard(c: Context): Response | undefined {
+  if (!backend.canWrite) return c.text("editing is disabled on this server", 403);
+  return csrfGuard(c);
 }
 
 /** The signed-in person, for attribution (FNS client name, git commit author). Undefined when login is off. */
@@ -137,6 +155,8 @@ function failed(c: Context, e: unknown): Response {
 
 async function body<T>(c: Context): Promise<T | undefined> {
   try {
+    const len = Number(c.req.header("content-length") ?? 0);
+    if (len > MAX_JSON_BYTES) return undefined;
     return (await c.req.json()) as T;
   } catch {
     return undefined;
@@ -217,6 +237,7 @@ app.post("/api/upload", async (c) => {
       const dot = name.lastIndexOf(".");
       dest = [folder, `${name.slice(0, dot)} ${n}${name.slice(dot)}`].filter(Boolean).join("/");
     }
+    if (await taken(dest)) return c.json({ error: "a file with that name already exists" }, 409);
     checkNewPath(dest, "folder"); // path sanity (no traversal, no hidden folders)
     await backend.upload!(dest, Buffer.from(await file.arrayBuffer()), who(c));
     return c.json({ ok: true, path: dest, name: dest.split("/").pop() });
@@ -274,16 +295,23 @@ app.get("/api/raw", async (c) => {
 
 if (fns) {
   app.get("/api/sync/status", (c) => c.json(fns!.status));
-  // Force a sync and wait for it. Any signed-in user may do this (all users have the same access).
+  // Force a sync and wait for it. Any signed-in user may do this (all users have the same access),
+  // but cross-site requests are refused and manual syncs are throttled to avoid hammering the upstream.
+  let lastManualSync = 0;
   app.post("/api/sync", async (c) => {
+    const denied = csrfGuard(c);
+    if (denied) return denied;
+    const since = Date.now() - lastManualSync;
+    if (since < 10_000) return c.json({ ok: false, error: "sync is throttled, try again shortly" }, 429);
+    lastManualSync = Date.now();
     await fns!.syncOnce();
     const st = fns!.status;
     return c.json({ ok: !st.lastError, error: st.lastError, changed: st.changed, notes: st.notes, files: st.files, at: st.lastOk });
   });
 }
 
-// Built frontend (SPA is hash-routed, so no rewrites needed)
-app.use("/*", serveStatic({ root: path.relative(process.cwd(), APP_DIST) }));
+// Built frontend (SPA is hash-routed, so no rewrites needed). Absolute root: independent of process cwd.
+app.use("/*", serveStatic({ root: APP_DIST }));
 
 await backend.init?.();
 serve({ fetch: app.fetch, port: PORT }, () => {
